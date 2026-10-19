@@ -89,6 +89,20 @@ summary::after{content:"+";float:right;color:var(--coral);font-weight:800}
 details[open] summary::after{content:"–"}
 details p{color:var(--muted);margin:12px 0 0}
 footer{padding:40px 0 56px;color:var(--muted);font-size:14px;text-align:center}
+
+/* support dialog */
+dialog.tip{border:0;border-radius:24px;padding:0;width:min(420px,calc(100vw - 32px));background:var(--card);color:var(--ink);box-shadow:0 30px 80px rgba(0,0,0,.25)}
+dialog.tip::backdrop{background:rgba(20,16,35,.55);backdrop-filter:blur(4px)}
+.tip-in{padding:28px;text-align:center}
+.tip-in img{width:88px;height:88px;margin:-4px auto 10px;display:block}
+.tip-in h3{font-size:26px;font-weight:900;margin:0 0 6px}
+.tip-in p{color:var(--muted);margin:0 0 18px}
+.amounts{display:flex;gap:8px;justify-content:center;margin-bottom:18px;flex-wrap:wrap}
+.amounts span{padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-weight:600}
+.amounts span.on{background:rgba(255,107,107,.12);border-color:var(--coral);color:var(--coral)}
+.tip-in .btn{width:100%;justify-content:center}
+.tip-in small{display:block;color:var(--muted);margin-top:12px;font-size:12.5px}
+.tip-x{position:absolute;top:12px;right:14px;background:none;border:0;font-size:22px;color:var(--muted);cursor:pointer}
 </style>
 </head>
 <body>
@@ -109,7 +123,7 @@ footer{padding:40px 0 56px;color:var(--muted);font-size:14px;text-align:center}
       <p class="lead">Turn an old Mac, an iPhone, an iPad or an Android phone or tablet into a smooth wireless extra screen for your Mac. Drag a window over, and it just works.</p>
       <div class="ctas">
         <a class="btn btn-primary" href="EncoreScreen.dmg" download>Download for Mac</a>
-        <a class="btn btn-ghost" href="#support">Support the project ☕</a>
+        <a class="btn btn-ghost" href="/support" data-support>Support the project ☕</a>
       </div>
       <div class="req">Your main Mac: macOS 14 or later, Apple silicon or Intel. Signed and notarized by Apple.</div>
     </div>
@@ -161,7 +175,7 @@ footer{padding:40px 0 56px;color:var(--muted);font-size:14px;text-align:center}
         <h2>Like it? Buy me a coffee.</h2>
         <p>Encore Screen is free. If it gave your old Mac a second life, a small tip keeps it going. You choose the amount.</p>
       </div>
-      <a class="btn" id="support-link" href="#support" target="_blank" rel="noopener">Support Encore Screen ☕</a>
+      <a class="btn" id="support-link" href="/support" data-support>Support Encore Screen ☕</a>
     </div>
   </div>
 </section>
@@ -181,5 +195,21 @@ footer{padding:40px 0 56px;color:var(--muted);font-size:14px;text-align:center}
 <footer>
   <div class="wrap">Made with care by Benjamin Benoudis. Encore Screen is not affiliated with Apple.</div>
 </footer>
+
+<dialog class="tip" id="tip">
+  <button class="tip-x" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
+  <div class="tip-in">
+    <img src="icon-256.png" alt="">
+    <h3>Buy me a coffee ☕</h3>
+    <p>Encore Screen is free. If it gave your old Mac a second life, any amount keeps it going.</p>
+    <div class="amounts"><span class="on">€5 suggested</span><span>or any amount from €1</span></div>
+    <a class="btn btn-primary" href="/support" target="_blank" rel="noopener">Choose my amount</a>
+    <small>Secure payment by Stripe · Apple Pay, Google Pay, cards</small>
+  </div>
+</dialog>
+<script>
+document.querySelectorAll('[data-support]').forEach(function(a){a.addEventListener('click',function(e){var d=document.getElementById('tip');if(d&&d.showModal){e.preventDefault();d.showModal()}})})
+document.getElementById('tip').addEventListener('click',function(e){if(e.target===this)this.close()})
+</script>
 </body>
 </html>

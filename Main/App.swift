@@ -187,6 +187,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         DirectCertificate.refresh { [weak self] changed in if changed { self?.web.reloadTLS() } }
     }
 
+    // Tip jar. Goes through the website so the payment page can change without a new app version.
+    @objc private func openSupport() { NSWorkspace.shared.open(URL(string: "https://encorescreen.com/support")!) }
+
     private func noteActivity() {
         DispatchQueue.main.async {
             self.lastActivity = Date()
@@ -321,6 +324,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         sub.addItem(item("Setup Assistant…", #selector(openOnboarding)))
         settings.submenu = sub
         menu.addItem(settings)
+        menu.addItem(item("Support Encore Screen ☕…", #selector(openSupport)))
         menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))
     }
 
