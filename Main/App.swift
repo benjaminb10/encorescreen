@@ -146,6 +146,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         lastReceiver = name
         if cutAirDrop && !smartAirDrop { pauseAirDrop() }
         let s = Session(name: name, endpoint: endpoint, bitrate: bitrate)
+        s.approve = { hello, done in ApprovedDevices.ask(hello, completion: done) }
         s.onActivity = { [weak self] in self?.noteActivity() }
         s.onStateChange = { [weak self] in
             self?.updateIcon()
@@ -160,6 +161,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             self.armAirDropGuard()
             if let reason { self.lastError = reason }
             if reason == Messages.localNetwork { self.localNetworkDenied = true }
+            if reason == Messages.refused { self.userStopped = true }   // don't reconnect to a refused screen
             if self.cutAirDrop && !self.anyScreenOn { self.resumeAirDrop() }
             self.updateIcon()
             // Unexpected drop (sleep, Wi-Fi): retry while the receiver is still advertised.
@@ -289,6 +291,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             sub.addItem(m)
         }
         sub.addItem(.separator())
+        sub.addItem(item("Forget Allowed Screens", #selector(forgetDevices)))
         let login = item("Open at Login", #selector(toggleLogin))
         login.state = LoginItem.enabled ? .on : .off
         sub.addItem(login)
@@ -299,6 +302,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))
     }
 
+    @objc private func forgetDevices() { ApprovedDevices.forgetAll() }
+
     @objc private func stopWebScreen(_ sender: NSMenuItem) { (sender.representedObject as? Session)?.stop() }
 
     @objc private func showQR() {
@@ -306,7 +311,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
                                     backing: .buffered, defer: false)
         w.title = "Encore Screen"
         w.isReleasedWhenClosed = false
-        w.contentView = NSHostingView(rootView: WebScreenQRView(url: web.url))
+        w.contentView = NSHostingView(rootView: WebScreenQRView(server: web))
         qrWindow = w
         w.center()
         NSApp.activate(ignoringOtherApps: true)

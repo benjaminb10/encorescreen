@@ -11,7 +11,7 @@ final class WebLink: ScreenLink {
     let conn: NWConnection
     let sendsPointerInline = true
     let localNetworkDenied = false
-    var onHello: ((Int, Int, CGSize, Int) -> Void)?
+    var onHello: ((Hello) -> Void)?
     var onClose: (() -> Void)?
     private let q = DispatchQueue(label: "encorescreen.web", qos: .userInteractive)
     private var inflight = 0
@@ -56,8 +56,11 @@ final class WebLink: ScreenLink {
                meta.opcode == .text,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let w = json["w"] as? Int, let h = json["h"] as? Int {
-                let scale = json["scale"] as? Int ?? 1
-                DispatchQueue.main.async { self.onHello?(w, h, .zero, scale) }
+                var hello = Hello(width: w, height: h, sizeMM: .zero, scale: json["scale"] as? Int ?? 1,
+                                  deviceID: json["id"] as? String ?? "", deviceName: json["name"] as? String ?? "Browser",
+                                  key: json["key"] as? String)
+                if let host = self.remoteHost { hello.deviceName += " (\(host))".replacingOccurrences(of: "%[^)]*", with: "", options: .regularExpression) }
+                DispatchQueue.main.async { self.onHello?(hello) }
             }
             self.receive()
         }
@@ -92,17 +95,44 @@ final class WebScreenServer: ObservableObject {
     private var socket: NWListener?
     private let q = DispatchQueue(label: "encorescreen.webserver")
 
-    var url: String { "http://\(localIPv4() ?? "localhost"):\(Self.pagePort)" }
+    // Secret part of the link (after #, so it never travels in the page request). Without it, no stream.
+    @Published private(set) var key: String = WebScreenServer.loadKey()
+    private let identity = TLSIdentity.load()
+
+    var url: String {
+        if identity != nil, let host = TLSIdentity.hostName { return "https://\(host):\(Self.pagePort)/#k=\(key)" }
+        return "http://\(localIPv4() ?? "localhost"):\(Self.pagePort)/#k=\(key)"
+    }
+    var encrypted: Bool { identity != nil }
+
+    private static func loadKey() -> String {
+        if let k = UserDefaults.standard.string(forKey: "webKey") { return k }
+        return newKey()
+    }
+
+    @discardableResult
+    private static func newKey() -> String {
+        let alphabet = Array("abcdefghjkmnpqrstuvwxyz23456789")
+        var bytes = [UInt8](repeating: 0, count: 20)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let k = String(bytes.map { alphabet[Int($0) % alphabet.count] })
+        UserDefaults.standard.set(k, forKey: "webKey")
+        return k
+    }
+
+    // New link: the old QR code stops working and connected browsers are disconnected.
+    func renewKey() {
+        key = Self.newKey()
+        stopAll()
+    }
 
     func start() {
-        let tcp = NWProtocolTCP.Options()
-        tcp.noDelay = true
-        if let l = try? NWListener(using: NWParameters(tls: nil, tcp: tcp), on: NWEndpoint.Port(rawValue: Self.pagePort)!) {
+        if let l = try? NWListener(using: TLSIdentity.parameters(identity), on: NWEndpoint.Port(rawValue: Self.pagePort)!) {
             l.newConnectionHandler = { [weak self] c in self?.servePage(c) }
             l.start(queue: q)
             http = l
         }
-        let params = NWParameters(tls: nil, tcp: tcp)
+        let params = TLSIdentity.parameters(identity)
         params.serviceClass = .interactiveVideo
         let ws = NWProtocolWebSocket.Options()
         ws.maximumMessageSize = 16 << 20
@@ -120,6 +150,11 @@ final class WebScreenServer: ObservableObject {
         var who = "Browser"
         if case let .hostPort(host, _) = c.endpoint { who = "Browser \(host)".replacingOccurrences(of: "%.*", with: "", options: .regularExpression) }
         let s = Session(name: who, link: WebLink(conn: c), bitrate: bitrate)
+        // Wrong or missing secret: refused without asking. Right secret: the user allows the device once.
+        s.approve = { [weak self] hello, done in
+            guard let self, let k = hello.key, !k.isEmpty, k == self.key else { done(false); return }
+            ApprovedDevices.ask(hello, completion: done)
+        }
         s.onActivity = { [weak self] in self?.onActivity?() }
         s.onStateChange = { [weak self] in self?.onChange?() }
         s.onEnd = { [weak self, weak s] _ in
@@ -146,7 +181,8 @@ final class WebScreenServer: ObservableObject {
 // Window with the QR code to open on the device that will become the screen.
 @available(macOS 14.0, *)
 struct WebScreenQRView: View {
-    let url: String
+    @ObservedObject var server: WebScreenServer
+    private var url: String { server.url }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -157,8 +193,15 @@ struct WebScreenQRView: View {
                 Image(nsImage: img).interpolation(.none).resizable().frame(width: 220, height: 220)
                     .padding(10).background(RoundedRectangle(cornerRadius: 14).fill(.white))
             }
-            Text(url).font(.system(size: 15, weight: .semibold, design: .monospaced)).textSelection(.enabled)
-            Text("Then tap the page once to go full screen.").font(.system(size: 11)).foregroundStyle(.tertiary)
+            Text(url).font(.system(size: 12, weight: .semibold, design: .monospaced)).textSelection(.enabled)
+                .multilineTextAlignment(.center)
+            Text("Then tap the page once to go full screen. You'll be asked to allow the device on this Mac.")
+                .font(.system(size: 11)).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+            Label(server.encrypted ? "Encrypted connection" : "Not encrypted yet: use it on a Wi-Fi you trust",
+                  systemImage: server.encrypted ? "lock.fill" : "lock.open")
+                .font(.system(size: 11)).foregroundStyle(server.encrypted ? .green : .orange)
+            Button("New Link") { server.renewKey() }
+                .help("The current link and QR code stop working, and connected devices are disconnected.")
         }
         .padding(28)
         .frame(width: 380)
@@ -192,19 +235,26 @@ canvas{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;cursor:n
 <body><canvas id="v"></canvas><img id="p"><div id="msg">Tap to start<small>This screen becomes your Mac's extra screen.</small></div>
 <script>
 const msg=document.getElementById('msg'),cv=document.getElementById('v'),ctx=cv.getContext('2d'),ptr=document.getElementById('p');
-let ws,dec,cfg='',needKey=true,vw=0,vh=0,hot=[0,0],ps=[0,0],ts=0;
+let ws,dec,cfg='',needKey=true,vw=0,vh=0,hot=[0,0],ps=[0,0],ts=0,denied=false;
+const key=(location.hash.match(/k=([a-z0-9]+)/)||[])[1]||'';
+let id=localStorage.getItem('es-id');if(!id){id=crypto.getRandomValues(new Uint32Array(4)).join('-');localStorage.setItem('es-id',id)}
+const ua=navigator.userAgent,name=/iPad/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1)?'iPad':/iPhone/.test(ua)?'iPhone':
+ /Android/.test(ua)?'Android device':/Windows/.test(ua)?'Windows PC':/CrOS/.test(ua)?'Chromebook':/Macintosh/.test(ua)?'Mac':'Browser';
 function say(t,s){msg.innerHTML=t+(s?'<small>'+s+'</small>':'');msg.style.display='flex'}
-if(!('VideoDecoder' in window)) say('This browser can\'t show the screen here','Use a recent Chrome or Safari. On this page, video decoding needs a secure connection.');
-msg.onclick=()=>{if(!('VideoDecoder' in window))return;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
-if(location.search.includes('auto')&&('VideoDecoder' in window))connect();
+if(!key) say('Scan the QR code on your Mac','Open Encore Screen\'s menu on your Mac, then \u201CAdd Any Device with a Browser\u201D.');
+else if(!('VideoDecoder' in window)) say('This browser can\'t show the screen here','Use a recent Chrome or Safari. On this page, video decoding needs a secure connection.');
+msg.onclick=()=>{if(!key||!('VideoDecoder' in window))return;denied=false;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
+if(location.search.includes('auto')&&key&&('VideoDecoder' in window))connect();
 function connect(){
  msg.style.display='none';
- ws=new WebSocket('ws://'+location.hostname+':7791');ws.binaryType='arraybuffer';
+ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.hostname+':7791');ws.binaryType='arraybuffer';
  ws.onopen=()=>{const d=window.devicePixelRatio||1;
-  ws.send(JSON.stringify({w:Math.round(screen.width*d),h:Math.round(screen.height*d),scale:d>=1.5?2:1}))};
- ws.onclose=()=>{say('Waiting for your Mac…','Reconnecting');cfg='';needKey=true;setTimeout(connect,2000)};
+  ws.send(JSON.stringify({w:Math.round(screen.width*d),h:Math.round(screen.height*d),scale:d>=1.5?2:1,key,id,name}));
+  say('Waiting for your Mac to allow this '+name+'…','Click \u201CAllow\u201D on your Mac.')};
+ ws.onclose=()=>{cfg='';needKey=true;if(denied){say('Not allowed','This link is out of date, or the device was refused on the Mac. Scan the QR code again.');return}
+  say('Waiting for your Mac…','Reconnecting');setTimeout(connect,2000)};
  ws.onmessage=e=>{const b=new Uint8Array(e.data),t=b[0],p=b.subarray(1);
-  if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close()};
+  if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close();else if(t===8){denied=true;ws.close()}};
 }
 function configure(p){
  const sl=(p[0]<<8)|p[1],sps=p.subarray(2,2+sl),o=2+sl,pl=(p[o]<<8)|p[o+1],pps=p.subarray(o+2,o+2+pl);
@@ -218,7 +268,7 @@ function configure(p){
 function isKey(p){let i=0;while(i+4<p.length){const n=((p[i]<<24)|(p[i+1]<<16)|(p[i+2]<<8)|p[i+3])>>>0;if((p[i+4]&31)===5)return true;i+=4+n}return false}
 function frame(p){if(!dec||dec.state!=='configured')return;const k=isKey(p);if(needKey&&!k)return;needKey=false;
  dec.decode(new EncodedVideoChunk({type:k?'key':'delta',timestamp:(ts+=16667),data:p}))}
-function draw(f){if(cv.width!==f.displayWidth||cv.height!==f.displayHeight){cv.width=vw=f.displayWidth;cv.height=vh=f.displayHeight}
+function draw(f){msg.style.display='none';if(cv.width!==f.displayWidth||cv.height!==f.displayHeight){cv.width=vw=f.displayWidth;cv.height=vh=f.displayHeight}
  ctx.drawImage(f,0,0);f.close()}
 function move(p){if(!vw)return;const x=((p[2]<<8)|p[3])/65535,y=((p[4]<<8)|p[5])/65535,vis=p[6]===1;
  const W=innerWidth,H=innerHeight,k=Math.min(W/vw,H/vh),rx=(W-vw*k)/2,ry=(H-vh*k)/2;

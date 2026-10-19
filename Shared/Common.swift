@@ -14,6 +14,27 @@ enum Proto {
     static let ping: UInt8 = 5         // main → screen: heartbeat, every second
     static let cursorPos: UInt8 = 6    // main → browser screen only: pointer position (native screens get it over UDP)
     static let cursorShape: UInt8 = 7  // main → screen: pointer image (position goes over UDP, see Cursor.swift)
+    static let denied: UInt8 = 8       // main → screen: this device was not allowed (wrong link, or refused on the Mac)
+}
+
+// What a screen says about itself when it connects.
+struct Hello {
+    var width: Int, height: Int
+    var sizeMM: CGSize
+    var scale: Int
+    var deviceID: String     // stable per device, used to remember approved screens
+    var deviceName: String
+    var key: String?         // browser screens only: the secret from the QR code link
+}
+
+// A stable random identifier for this Mac when it acts as a screen.
+enum DeviceIdentity {
+    static var id: String {
+        if let s = UserDefaults.standard.string(forKey: "deviceID") { return s }
+        let s = UUID().uuidString
+        UserDefaults.standard.set(s, forKey: "deviceID")
+        return s
+    }
 }
 
 // Which role this Mac plays. Stored per Mac, chosen in the welcome window.

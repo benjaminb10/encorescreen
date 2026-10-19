@@ -38,7 +38,7 @@ final class VirtualScreen {
 // What a session needs from its connection to a screen: the native TCP link below, or a browser (WebScreen.swift).
 @available(macOS 14.0, *)
 protocol ScreenLink: AnyObject {
-    var onHello: ((Int, Int, CGSize, Int) -> Void)? { get set }
+    var onHello: ((Hello) -> Void)? { get set }
     var onClose: (() -> Void)? { get set }
     var localNetworkDenied: Bool { get }
     var remoteHost: NWEndpoint.Host? { get }
@@ -57,7 +57,8 @@ final class Link: ScreenLink {
     private let q = DispatchQueue(label: "encorescreen.link", qos: .userInteractive)
     private var inflight = 0
     private var closed = false
-    var onHello: ((Int, Int, CGSize, Int) -> Void)?
+    var onHello: ((Hello) -> Void)?
+    var screenName = ""
     private(set) var localNetworkDenied = false
     var onClose: (() -> Void)?
 
@@ -125,7 +126,14 @@ final class Link: ScreenLink {
                     func u16(_ i: Int) -> Int { Int(m[i]) << 8 | Int(m[i + 1]) }
                     let (w, h, mw, mh) = (u16(1), u16(3), u16(5), u16(7))
                     let scale = m.count >= 10 ? max(1, Int(m[9])) : 1
-                    DispatchQueue.main.async { self.onHello?(w, h, CGSize(width: mw, height: mh), scale) }
+                    var id = ""
+                    if m.count >= 11 {
+                        let n = Int(m[10])
+                        if m.count >= 11 + n { id = String(decoding: m[11..<(11 + n)], as: UTF8.self) }
+                    }
+                    let hello = Hello(width: w, height: h, sizeMM: CGSize(width: mw, height: mh), scale: scale,
+                                      deviceID: id.isEmpty ? "legacy-\(self.screenName)" : id, deviceName: self.screenName, key: nil)
+                    DispatchQueue.main.async { self.onHello?(hello) }
                 }
                 if !done { self.readHeader() }
             }
@@ -222,6 +230,7 @@ final class Encoder {
 
 enum Messages {
     static let localNetwork = "macOS is blocking the connection. Turn on Encore Screen in System Settings > Privacy & Security > Local Network."
+    static let refused = "This screen was not allowed."
 }
 
 // One session = one connection to a receiver, with its own virtual display.
@@ -241,6 +250,8 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     var onStateChange: (() -> Void)?
     var onActivity: (() -> Void)?   // something moved on the extra screen (new frame or pointer move)
     var onEnd: ((String?) -> Void)?
+    // Called once the screen has introduced itself; answer true to start showing the extra screen.
+    var approve: ((Hello, @escaping (Bool) -> Void) -> Void)?
     private var endReason: String?
 
     init(name: String, link: ScreenLink, bitrate: Int) {
@@ -254,7 +265,14 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func start() {
-        link.onHello = { [weak self] w, h, mm, scale in self?.begin(width: w, height: h, sizeMM: mm, scale: scale) }
+        (link as? Link)?.screenName = name
+        link.onHello = { [weak self] hello in
+            guard let self else { return }
+            guard let approve = self.approve else { self.begin(hello); return }
+            approve(hello) { ok in
+                if ok { self.begin(hello) } else { self.endReason = Messages.refused; self.deny() }
+            }
+        }
         link.onClose = { [weak self] in
             guard let self else { return }
             if self.link.localNetworkDenied { self.endReason = Messages.localNetwork }
@@ -266,7 +284,13 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stop() { link.sayGoodbye() }
 
-    private func begin(width: Int, height: Int, sizeMM: CGSize, scale: Int) {
+    private func deny() {
+        _ = link.send(type: Proto.denied, payload: Data())
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.link.stop() }
+    }
+
+    private func begin(_ hello: Hello) {
+        let (width, height, sizeMM, scale) = (hello.width, hello.height, hello.sizeMM, hello.scale)
         // Retina receivers get a HiDPI virtual display (sharp text), capped at 4K to keep Wi-Fi happy.
         let hiDPI = scale >= 2
         let cap = hiDPI ? 3840 : 2560

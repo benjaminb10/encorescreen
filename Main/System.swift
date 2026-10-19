@@ -1,6 +1,7 @@
 // System integration: AirDrop (awdl0 interface), screen capture and local network permissions.
 import AppKit
 import AVFoundation
+import Network
 import ScreenCaptureKit
 
 // AirDrop makes Wi-Fi hop channels several times per second, which causes stutter.
@@ -92,5 +93,63 @@ enum ScreenPermission {
 enum LocalNetwork {
     static func openSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")!)
+    }
+}
+
+// Screens the user allowed once. A new device (or one that changed identity) has to be allowed on this Mac.
+enum ApprovedDevices {
+    private static let key = "approvedDevices"
+    static var all: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+    static func contains(_ id: String) -> Bool { !id.isEmpty && all[id] != nil }
+    static func add(_ id: String, name: String) { guard !id.isEmpty else { return }; all[id] = name }
+    static func forgetAll() { all = [:] }
+
+    // Asks on this Mac, once per device. Remembered afterwards.
+    static func ask(_ hello: Hello, completion: @escaping (Bool) -> Void) {
+        if contains(hello.deviceID) { completion(true); return }
+        let alert = NSAlert()
+        alert.messageText = "Show your extra screen on \u{201C}\(hello.deviceName)\u{201D}?"
+        alert.informativeText = "A device on your network wants to become your extra screen. It will see everything you put on that screen. Only allow devices you own."
+        alert.icon = NSApp.applicationIconImage
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Don't Allow")
+        NSApp.activate(ignoringOtherApps: true)
+        let ok = alert.runModal() == .alertFirstButtonReturn
+        if ok { add(hello.deviceID, name: hello.deviceName) }
+        completion(ok)
+    }
+}
+
+// Encryption for browser screens. When a certificate is installed (issued for this Mac by encorescreen.com,
+// see docs/https.md), the page and the stream are served over HTTPS / WSS. Without one, plain HTTP / WS.
+enum TLSIdentity {
+    static var folder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Encore Screen")
+    }
+    static var p12: URL { folder.appendingPathComponent("tls.p12") }
+    // Host name the certificate was issued for, e.g. 192-168-1-15.a1b2c3.encorescreen.com.
+    static var hostName: String? { try? String(contentsOf: folder.appendingPathComponent("tls-host.txt")).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    static func load() -> sec_identity_t? {
+        guard let data = try? Data(contentsOf: p12) else { return nil }
+        let password = (try? String(contentsOf: folder.appendingPathComponent("tls-password.txt")).trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+        var items: CFArray?
+        guard SecPKCS12Import(data as CFData, [kSecImportExportPassphrase as String: password] as CFDictionary, &items) == errSecSuccess,
+              let first = (items as? [[String: Any]])?.first,
+              let identity = first[kSecImportItemIdentity as String] else { return nil }
+        return sec_identity_create(identity as! SecIdentity)
+    }
+
+    static func parameters(_ identity: sec_identity_t?) -> NWParameters {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        guard let identity else { return NWParameters(tls: nil, tcp: tcp) }
+        let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_local_identity(tls.securityProtocolOptions, identity)
+        sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        return NWParameters(tls: tls, tcp: tcp)
     }
 }
