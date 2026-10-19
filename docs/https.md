@@ -15,5 +15,14 @@ anyway. Each Mac therefore needs a real certificate for a name that points to it
    `~/Library/Application Support/Encore Screen/`. `TLSIdentity` picks them up: the page and the
    WebSocket switch to HTTPS / WSS and the QR code shows the https link.
 
-Already done in the app: TLS listeners, wss in the page, https URL in the QR code (tested end to end with a
-temporary certificate on the 2012 iMac). Missing: the domain and the certificate service.
+## Status: live
+
+- Service: `site/api/cert.js` and `site/api/ip.js`, deployed with the site on Vercel (encorescreen.com/api).
+  Env vars: `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`, `ACME_ACCOUNT_KEY`. `?staging=1` uses Let's Encrypt staging.
+- Ownership: the first request stores sha256(token) in `_owner.<id>.direct` (TXT). Only private IPv4 addresses
+  are accepted for names.
+- App: `Main/Certificate.swift` (runs at launch and every 15 min). RSA 2048 keys, so the chain ends at
+  ISRG Root X1 (older iPhones, Android, Catalina). The full chain is sent by `TLSIdentity.load()`.
+- Limit to watch: Let's Encrypt allows 50 new certificates per week for encorescreen.com (renewals don't count).
+  If the app takes off: ask Let's Encrypt for a rate limit increase, or add `direct.encorescreen.com` to the
+  Public Suffix List.

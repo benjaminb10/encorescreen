@@ -1,0 +1,8 @@
+{
+  "name": "encorescreen-site",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "acme-client": "^5.4.0"
+  }
+}

@@ -22,6 +22,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     private var userStopped = false
     private var airDropGuard: Timer?
     let web = WebScreenServer()
+    private var certificateTimer: Timer?
     private var qrWindow: NSWindow?
     private var lastActivity = Date.distantPast
     private var airDropPaused = false
@@ -55,6 +56,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         web.onActivity = { [weak self] in self?.noteActivity() }
         web.onChange = { [weak self] in self?.updateIcon(); self?.armAirDropGuard() }
         web.start()
+        refreshCertificate()
+        certificateTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in self?.refreshCertificate() }
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
         if !defaults.bool(forKey: "mainConfigured") {
@@ -178,6 +181,11 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 
     private var anyScreenOn: Bool { session != nil || !web.sessions.isEmpty }
+
+    // Gets (or renews) this Mac's HTTPS certificate and keeps its name pointing to the current local address.
+    private func refreshCertificate() {
+        DirectCertificate.refresh { [weak self] changed in if changed { self?.web.reloadTLS() } }
+    }
 
     private func noteActivity() {
         DispatchQueue.main.async {

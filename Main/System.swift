@@ -140,6 +140,9 @@ enum TLSIdentity {
         guard SecPKCS12Import(data as CFData, [kSecImportExportPassphrase as String: password] as CFDictionary, &items) == errSecSuccess,
               let first = (items as? [[String: Any]])?.first,
               let identity = first[kSecImportItemIdentity as String] else { return nil }
+        // Send the intermediate certificate too: Android and some browsers don't fetch it themselves.
+        let chain = (first[kSecImportItemCertChain as String] as? [SecCertificate]) ?? []
+        if chain.count > 1, let withChain = sec_identity_create_with_certificates(identity as! SecIdentity, Array(chain.dropFirst()) as CFArray) { return withChain }
         return sec_identity_create(identity as! SecIdentity)
     }
 

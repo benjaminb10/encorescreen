@@ -2,3 +2,4 @@ build/
 .DS_Store
 *.iconset/
 site/EncoreScreen.dmg
+site/node_modules

@@ -128,7 +128,7 @@ final class WebScreenServer: ObservableObject {
 
     // Secret part of the link (after #, so it never travels in the page request). Without it, no stream.
     @Published private(set) var key: String = WebScreenServer.loadKey()
-    private let identity = TLSIdentity.load()
+    private var identity = TLSIdentity.load()
 
     var url: String {
         if identity != nil, let host = TLSIdentity.hostName { return "https://\(host):\(Self.pagePort)/#k=\(key)" }
@@ -176,6 +176,15 @@ final class WebScreenServer: ObservableObject {
     }
 
     func stopAll() { sessions.forEach { $0.stop() } }
+
+    // A new certificate or name: listen again with it. Screens already connected keep their connection.
+    func reloadTLS() {
+        identity = TLSIdentity.load()
+        http?.cancel(); socket?.cancel()
+        http = nil; socket = nil
+        objectWillChange.send()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.start() }
+    }
 
     private func accept(_ c: NWConnection) {
         var who = "Browser"
