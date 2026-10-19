@@ -60,16 +60,13 @@ enum ScreenPermission {
 
     // Touching ScreenCaptureKit registers the app in System Settings and shows the system prompt.
     // Settings only opens if access is still missing a moment later, with SpareScreen already listed.
-    // One request only: touching ScreenCaptureKit lists SpareScreen in System Settings and shows the system prompt once.
-    // Settings opens only if access is still missing a moment later.
+    // Registers SpareScreen in System Settings and shows the system prompt (which has its own
+    // "Open System Settings" button). If macOS already showed it once, go straight to the settings pane.
     static func request() {
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { _, _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                if !granted {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                }
-            }
+        if !CGRequestScreenCaptureAccess() && UserDefaults.standard.bool(forKey: "screenPromptShown") {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
         }
+        UserDefaults.standard.set(true, forKey: "screenPromptShown")
     }
 }
 
