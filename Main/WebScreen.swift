@@ -299,6 +299,10 @@ else if(!('VideoDecoder' in window)) say('This browser can\'t show the screen he
 msg.onclick=()=>{if(!key||!('VideoDecoder' in window))return;denied=false;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
 if(location.search.includes('auto')&&key&&('VideoDecoder' in window))connect();
 const VERSION='__VERSION__';
+// The Mac sends a heartbeat every second while streaming. Four seconds of silence means the connection died
+// without a proper close (the Mac app restarted, Wi-Fi dropped): reconnect instead of staying frozen.
+let lastMsg=0;
+setInterval(()=>{if(ws&&ws.readyState===1&&vw&&Date.now()-lastMsg>4000){lastMsg=Date.now();ws.close()}},1000);
 function connect(){
  fetch('/version',{cache:'no-store'}).then(r=>r.text()).then(v=>{if(v&&v!==VERSION)location.reload()}).catch(()=>{});
  msg.style.display='none';
@@ -309,7 +313,7 @@ function connect(){
   say('Waiting for your Mac to allow this '+name+'…','Click \u201CAllow\u201D on your Mac.')};
  ws.onclose=()=>{cfg='';needKey=true;if(denied){say('Not allowed','This link is out of date, or the device was refused on the Mac. Scan the QR code again.');return}
   say('Waiting for your Mac…','Reconnecting');setTimeout(connect,2000)};
- ws.onmessage=e=>{const b=new Uint8Array(e.data),t=b[0],p=b.subarray(1);
+ ws.onmessage=e=>{lastMsg=Date.now();const b=new Uint8Array(e.data),t=b[0],p=b.subarray(1);
   if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close();else if(t===8){denied=true;ws.close()}
   else if(t===9){try{const f=JSON.parse(new TextDecoder().decode(p));kb.style.display=f.on?'block':'none';if(!f.on)ti.blur()}catch(_){}}};
 }
