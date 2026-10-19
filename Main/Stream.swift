@@ -5,28 +5,18 @@ import Network
 import ScreenCaptureKit
 import VideoToolbox
 
-enum Proto {
-    static let serviceType = "_sparescreen._tcp"
-    static let params: UInt8 = 1   // sender → receiver: SPS + PPS
-    static let frame: UInt8 = 2    // sender → receiver: H.264 frame (AVCC)
-    static let hello: UInt8 = 3    // receiver → sender: screen size
-    static let bye: UInt8 = 4      // sender → receiver: streaming stopped on purpose
-    static let ping: UInt8 = 5     // sender → receiver: heartbeat, every second
-    static let cursorShape: UInt8 = 7  // sender → receiver: pointer image (position goes over UDP, see Cursor.swift)
-}
-
-func log(_ s: String) { NSLog("[SpareScreen] %@", s) }
-
 // Stable hash (djb2): same serial number on every connection, so macOS remembers the display arrangement.
 func stableHash(_ s: String) -> UInt32 {
     s.utf8.reduce(UInt32(5381)) { ($0 &<< 5) &+ $0 &+ UInt32($1) }
 }
 
+@available(macOS 14.0, *)
 final class VirtualScreen {
     let display: CGVirtualDisplay
     var displayID: CGDirectDisplayID { display.displayID }
 
-    init(name: String, width: Int, height: Int, sizeMM: CGSize) {
+    // width/height are pixels. On a Retina receiver (hiDPI) macOS uses half of that as the "looks like" size.
+    init(name: String, width: Int, height: Int, sizeMM: CGSize, hiDPI: Bool) {
         let desc = CGVirtualDisplayDescriptor()
         desc.setDispatchQueue(DispatchQueue.main)
         desc.name = name
@@ -38,19 +28,22 @@ final class VirtualScreen {
         desc.serialNum = stableHash(name)
         display = CGVirtualDisplay(descriptor: desc)
         let settings = CGVirtualDisplaySettings()
-        settings.hiDPI = 0
-        settings.modes = [CGVirtualDisplayMode(width: UInt32(width), height: UInt32(height), refreshRate: 60)]
+        settings.hiDPI = hiDPI ? 1 : 0
+        let (mw, mh) = hiDPI ? (width / 2, height / 2) : (width, height)
+        settings.modes = [CGVirtualDisplayMode(width: UInt32(mw), height: UInt32(mh), refreshRate: 60)]
         display.applySettings(settings)
     }
 }
 
 // Wire format: [u32 BE length][u8 type][payload].
+@available(macOS 14.0, *)
 final class Link {
     let conn: NWConnection
     private let q = DispatchQueue(label: "sparescreen.link", qos: .userInteractive)
     private var inflight = 0
     private var closed = false
-    var onHello: ((Int, Int, CGSize) -> Void)?
+    var onHello: ((Int, Int, CGSize, Int) -> Void)?
+    private(set) var localNetworkDenied = false
     var onClose: (() -> Void)?
 
     init(endpoint: NWEndpoint) {
@@ -64,7 +57,9 @@ final class Link {
             guard let self else { return }
             switch st {
             case .ready: self.readHeader()
-            case .waiting: self.conn.cancel()
+            case .waiting:
+                if self.conn.currentPath?.unsatisfiedReason == .localNetworkDenied { self.localNetworkDenied = true }
+                self.conn.cancel()
             case .failed, .cancelled: self.finish()
             default: break
             }
@@ -73,6 +68,7 @@ final class Link {
         // A connection blocked by macOS (e.g. Local Network permission) can hang forever: give up after 5 s and retry.
         q.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.conn.state != .ready else { return }
+            if self.conn.currentPath?.unsatisfiedReason == .localNetworkDenied { self.localNetworkDenied = true }
             self.conn.cancel()
         }
     }
@@ -111,7 +107,8 @@ final class Link {
                 if m[0] == Proto.hello, m.count >= 9 {
                     func u16(_ i: Int) -> Int { Int(m[i]) << 8 | Int(m[i + 1]) }
                     let (w, h, mw, mh) = (u16(1), u16(3), u16(5), u16(7))
-                    DispatchQueue.main.async { self.onHello?(w, h, CGSize(width: mw, height: mh)) }
+                    let scale = m.count >= 10 ? max(1, Int(m[9])) : 1
+                    DispatchQueue.main.async { self.onHello?(w, h, CGSize(width: mw, height: mh), scale) }
                 }
                 if !done { self.readHeader() }
             }
@@ -135,6 +132,7 @@ final class Link {
     }
 }
 
+@available(macOS 14.0, *)
 final class Encoder {
     private var session: VTCompressionSession?
     private let link: Link
@@ -205,7 +203,12 @@ final class Encoder {
     }
 }
 
+enum Messages {
+    static let localNetwork = "macOS is blocking the connection. Turn on SpareScreen in System Settings > Privacy & Security > Local Network."
+}
+
 // One session = one connection to a receiver, with its own virtual display.
+@available(macOS 14.0, *)
 final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     let name: String
     let link: Link
@@ -229,9 +232,10 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func start() {
-        link.onHello = { [weak self] w, h, mm in self?.begin(width: w, height: h, sizeMM: mm) }
+        link.onHello = { [weak self] w, h, mm, scale in self?.begin(width: w, height: h, sizeMM: mm, scale: scale) }
         link.onClose = { [weak self] in
             guard let self else { return }
+            if self.link.localNetworkDenied { self.endReason = Messages.localNetwork }
             self.teardown()
             self.onEnd?(self.endReason)
         }
@@ -240,13 +244,16 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stop() { link.sayGoodbye() }
 
-    private func begin(width: Int, height: Int, sizeMM: CGSize) {
+    private func begin(width: Int, height: Int, sizeMM: CGSize, scale: Int) {
+        // Retina receivers get a HiDPI virtual display (sharp text), capped at 4K to keep Wi-Fi happy.
+        let hiDPI = scale >= 2
+        let cap = hiDPI ? 3840 : 2560
         var w = width, h = height
-        if w > 2560 { h = h * 2560 / w; w = 2560 }
-        w &= ~1; h &= ~1
-        log("receiver \(name): \(width)x\(height), streaming at \(w)x\(h)")
+        if w > cap { h = h * cap / w; w = cap }
+        w &= hiDPI ? ~3 : ~1; h &= hiDPI ? ~3 : ~1
+        log("receiver \(name): \(width)x\(height) @\(scale)x, streaming at \(w)x\(h)")
         let mm = sizeMM.width > 0 ? sizeMM : CGSize(width: 476, height: 268)
-        let vs = VirtualScreen(name: name, width: w, height: h, sizeMM: mm)
+        let vs = VirtualScreen(name: name, width: w, height: h, sizeMM: mm, hiDPI: hiDPI)
         screen = vs
         Task { await self.startCapture(displayID: vs.displayID, width: w, height: h) }
     }
@@ -262,7 +269,9 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                 cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
                 cfg.showsCursor = false   // the receiver draws the pointer itself (Cursor.swift)
                 cfg.queueDepth = 5
-                guard let enc = Encoder(width: width, height: height, bitrate: bitrate, link: link) else {
+                // More pixels need more bits: 25 Mbit/s for 1080p, scaled up to 60 Mbit/s for 4K.
+                let rate = min(60_000_000, max(bitrate, bitrate * width * height / (1920 * 1080)))
+                guard let enc = Encoder(width: width, height: height, bitrate: rate, link: link) else {
                     endReason = "Video encoder unavailable."; link.stop(); return
                 }
                 encoder = enc

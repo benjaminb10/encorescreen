@@ -1,13 +1,9 @@
-// SpareScreen Receiver: advertises itself on the network (Bonjour), receives the H.264 stream and shows it full screen.
-// Runs on macOS 10.15 Catalina and later. Press Esc while streaming to go back to the home window.
+// Screen mode ("Make this an extra screen"): advertises this Mac on the network (Bonjour), receives the
+// H.264 stream and shows it full screen, with the pointer drawn locally. Runs on macOS 10.15 Catalina and later.
 import AVFoundation
 import Cocoa
 import CoreMedia
 import Network
-
-let serviceType = "_sparescreen._tcp"
-
-func log(_ s: String) { NSLog("[SpareScreen Receiver] %@", s) }
 
 final class Receiver {
     private var listener: NWListener?
@@ -28,10 +24,10 @@ final class Receiver {
     func start() {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
-        guard let l = try? NWListener(using: NWParameters(tls: nil, tcp: tcp), on: 7777) else {
+        guard let l = try? NWListener(using: NWParameters(tls: nil, tcp: tcp), on: NWEndpoint.Port(rawValue: Proto.videoPort)!) else {
             log("port 7777 unavailable"); return
         }
-        l.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
+        l.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: Proto.serviceType)
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         l.stateUpdateHandler = { st in log("listener: \(st)") }
         l.start(queue: q)
@@ -51,7 +47,7 @@ final class Receiver {
 
     // Pointer positions arrive as small UDP datagrams, see Cursor.swift on the sender.
     private func startCursorChannel() {
-        guard let l = try? NWListener(using: .udp, on: 7778) else { log("port 7778 unavailable"); return }
+        guard let l = try? NWListener(using: .udp, on: NWEndpoint.Port(rawValue: Proto.cursorPort)!) else { log("port 7778 unavailable"); return }
         l.newConnectionHandler = { [weak self] c in
             c.start(queue: self?.q ?? .main)
             self?.readCursor(c)
@@ -109,9 +105,10 @@ final class Receiver {
 
     // Announces the screen size: [u16 width px][u16 height px][u16 width mm][u16 height mm].
     private func sendHello(_ c: NWConnection) {
-        var w = 1920, h = 1080, mw = 0, mh = 0
+        var w = 1920, h = 1080, mw = 0, mh = 0, scale = 1
         DispatchQueue.main.sync {
             if let s = NSScreen.main {
+                scale = Int(s.backingScaleFactor.rounded())
                 w = Int(s.frame.width * s.backingScaleFactor)
                 h = Int(s.frame.height * s.backingScaleFactor)
                 if let n = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
@@ -122,6 +119,7 @@ final class Receiver {
         }
         var body: [UInt8] = [3]
         for v in [w, h, mw, mh] { body += [UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
+        body.append(UInt8(scale))
         let len = body.count
         let msg = [UInt8((len >> 24) & 0xFF), UInt8((len >> 16) & 0xFF), UInt8((len >> 8) & 0xFF), UInt8(len & 0xFF)] + body
         c.send(content: Data(msg), completion: .idempotent)
@@ -201,74 +199,8 @@ final class Receiver {
     }
 }
 
-// Open at login through a LaunchAgent (works on Catalina).
-enum LoginItem {
-    static let label = "app.sparescreen.receiver"
-    static var url: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
-    }
-    static var enabled: Bool { FileManager.default.fileExists(atPath: url.path) }
-
-    static func set(_ on: Bool) {
-        if on {
-            let plist: [String: Any] = [
-                "Label": label,
-                "ProgramArguments": ["/usr/bin/open", "-a", Bundle.main.bundlePath],
-                "RunAtLoad": true,
-            ]
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            (plist as NSDictionary).write(to: url, atomically: true)
-        } else {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-}
-
-func localIPv4() -> String? {
-    var addr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&addr) == 0, let first = addr else { return nil }
-    defer { freeifaddrs(addr) }
-    for p in sequence(first: first, next: { $0.pointee.ifa_next }) {
-        let a = p.pointee
-        guard a.ifa_addr.pointee.sa_family == UInt8(AF_INET), let name = String(validatingUTF8: a.ifa_name),
-              name.hasPrefix("en") else { continue }
-        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        getnameinfo(a.ifa_addr, socklen_t(a.ifa_addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
-        return String(cString: host)
-    }
-    return nil
-}
-
-enum Brand {
-    static let orange = NSColor(srgbRed: 1.0, green: 0.70, blue: 0.28, alpha: 1)   // #FFB347
-    static let coral = NSColor(srgbRed: 1.0, green: 0.42, blue: 0.42, alpha: 1)    // #FF6B6B
-}
-
-final class GradientHeader: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        NSGradient(starting: Brand.coral, ending: Brand.orange)?.draw(in: bounds, angle: -30)
-    }
-}
-
-// Small breathing dot next to the "waiting" status.
-final class PulseDot: NSView {
-    override init(frame: NSRect) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
-        wantsLayer = true
-        layer?.backgroundColor = Brand.coral.cgColor
-        layer?.cornerRadius = 5
-        translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 10).isActive = true
-        heightAnchor.constraint(equalToConstant: 10).isActive = true
-        let a = CABasicAnimation(keyPath: "opacity")
-        a.fromValue = 1; a.toValue = 0.25; a.duration = 0.9; a.autoreverses = true; a.repeatCount = .infinity
-        layer?.add(a, forKey: "pulse")
-    }
-    convenience init() { self.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-}
-
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class ScreenController: NSObject {
+    var onSwitchMode: (() -> Void)?
     var home: NSWindow!
     var full: NSWindow!
     var layer = AVSampleBufferDisplayLayer()
@@ -280,14 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let receiver = Receiver()
     var activity: NSObjectProtocol?
 
-    func applicationDidFinishLaunching(_ n: Notification) {
-        buildMenu()
+    func start() {
+        if !UserDefaults.standard.bool(forKey: "screenConfigured") {
+            LoginItem.set(true)
+            UserDefaults.standard.set(true, forKey: "screenConfigured")
+        }
+        KeepAwake.apply()
         buildHome()
         buildFullscreen()
-        if !UserDefaults.standard.bool(forKey: "configured") {
-            LoginItem.set(true)
-            UserDefaults.standard.set(true, forKey: "configured")
-        }
         receiver.onConnect = { [weak self] who in self?.status.stringValue = "Connecting…"; self?.enterFullscreen() }
         receiver.onDisconnect = { [weak self] in self?.leaveFullscreen() }
         receiver.onVideoSize = { [weak self] size in self?.videoSize = size }
@@ -312,101 +244,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    func reopen() {
         if !full.isVisible { home.makeKeyAndOrderFront(nil) }
-        return true
-    }
-
-    private func buildMenu() {
-        let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
-        let m = NSMenu()
-        m.addItem(withTitle: "Quit SpareScreen Receiver", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = m
-        NSApp.mainMenu = main
-    }
-
-    private func label(_ s: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> NSTextField {
-        let t = NSTextField(wrappingLabelWithString: s)
-        t.font = .systemFont(ofSize: size, weight: weight)
-        t.textColor = color
-        return t
-    }
-
-    private func stepRow(_ n: Int, _ title: String, _ detail: String) -> NSView {
-        let badge = NSTextField(labelWithString: "\(n)")
-        badge.font = .systemFont(ofSize: 15, weight: .bold)
-        badge.textColor = Brand.coral
-        badge.alignment = .center
-        let circle = NSView()
-        circle.wantsLayer = true
-        circle.layer?.backgroundColor = Brand.coral.withAlphaComponent(0.15).cgColor
-        circle.layer?.cornerRadius = 16
-        circle.translatesAutoresizingMaskIntoConstraints = false
-        badge.translatesAutoresizingMaskIntoConstraints = false
-        circle.addSubview(badge)
-        NSLayoutConstraint.activate([
-            circle.widthAnchor.constraint(equalToConstant: 32), circle.heightAnchor.constraint(equalToConstant: 32),
-            badge.centerXAnchor.constraint(equalTo: circle.centerXAnchor), badge.centerYAnchor.constraint(equalTo: circle.centerYAnchor),
-        ])
-        let text = NSStackView(views: [label(title, size: 13, weight: .semibold), label(detail, size: 12, color: .secondaryLabelColor)])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 2
-        let row = NSStackView(views: [circle, text])
-        row.alignment = .centerY
-        row.spacing = 12
-        return row
     }
 
     private func buildHome() {
-        home = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 560),
+        home = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 600),
                         styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
-        home.title = "SpareScreen Receiver"
+        home.title = "SpareScreen"
         home.titlebarAppearsTransparent = true
         home.titleVisibility = .hidden
         home.isReleasedWhenClosed = false
         let name = Host.current().localizedName ?? "this Mac"
 
-        let header = GradientHeader()
-        let icon = NSImageView(image: NSApp.applicationIconImage)
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        let title = label("SpareScreen Receiver", size: 26, weight: .bold, color: .white)
-        title.alignment = .center
-        let subtitle = label("This screen is about to become an extra display.", size: 13, weight: .medium, color: NSColor.white.withAlphaComponent(0.92))
-        subtitle.alignment = .center
-        let headerStack = NSStackView(views: [icon, title, subtitle])
-        headerStack.orientation = .vertical
-        headerStack.spacing = 6
-        headerStack.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(headerStack)
-        header.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 104), icon.heightAnchor.constraint(equalToConstant: 104),
-            headerStack.centerXAnchor.constraint(equalTo: header.centerXAnchor),
-            headerStack.topAnchor.constraint(equalTo: header.topAnchor, constant: 36),
-            headerStack.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -22),
-        ])
-
-        status = label("Waiting for your Mac…", size: 13, weight: .semibold, color: Brand.coral)
-        let dot = PulseDot()
-        let statusRow = NSStackView(views: [dot, status])
+        let header = brandHeader(title: "Ready to be your extra screen", tagline: "Leave this window open. Your main Mac does the rest.")
+        status = label("Waiting for your main Mac…", size: 13, weight: .semibold, color: Brand.coral)
+        let statusRow = NSStackView(views: [PulseDot(), status])
         statusRow.spacing = 8
-        let check = NSButton(checkboxWithTitle: "Open at login", target: self, action: #selector(toggleLogin(_:)))
-        check.state = LoginItem.enabled || !UserDefaults.standard.bool(forKey: "configured") ? .on : .off
-        let info = label("This device: \(name)" + (localIPv4().map { " · \($0)" } ?? ""), size: 11, color: .tertiaryLabelColor)
+
+        let login = NSButton(checkboxWithTitle: "Open SpareScreen at login", target: self, action: #selector(toggleLogin(_:)))
+        login.state = LoginItem.enabled ? .on : .off
+        let awake = NSButton(checkboxWithTitle: "Keep this Mac awake, so it's always ready", target: self, action: #selector(toggleAwake(_:)))
+        awake.state = KeepAwake.preferred ? .on : .off
+        let info = label("This Mac: \(name)" + (localIPv4().map { " · \($0)" } ?? ""), size: 11, color: .tertiaryLabelColor)
+        let switchRole = linkButton("Use this Mac differently…", target: self, action: #selector(switchRole))
 
         let body = NSStackView(views: [
-            stepRow(1, "Open SpareScreen on your Mac", "The free app for your main Mac, on the same Wi-Fi."),
-            stepRow(2, "Pick \u{201C}\(name)\u{201D}", "Click the smiling screen in your Mac's menu bar."),
-            stepRow(3, "That's it", "This screen goes full screen. Press Esc to come back here."),
-            statusRow, check, info,
+            numberedRow(1, "Open SpareScreen on your main Mac", "Same app, same Wi-Fi. Choose \u{201C}This is my main Mac\u{201D}."),
+            numberedRow(2, "Pick \u{201C}\(name)\u{201D}", "From the smiling screen in your main Mac's menu bar."),
+            numberedRow(3, "That's it", "This screen fills up with your extra desktop. Press Esc to come back here."),
+            statusRow, login, awake, info, switchRole,
         ])
         body.orientation = .vertical
         body.alignment = .leading
-        body.spacing = 16
+        body.spacing = 14
         body.setCustomSpacing(24, after: body.arrangedSubviews[2])
+        body.setCustomSpacing(20, after: statusRow)
         body.edgeInsets = NSEdgeInsets(top: 24, left: 28, bottom: 24, right: 28)
 
         let root = NSStackView(views: [header, body])
@@ -477,15 +350,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.presentationOptions = []
         NSCursor.unhide()
         if let a = activity { ProcessInfo.processInfo.endActivity(a); activity = nil }
-        status.stringValue = "Waiting for your Mac…"
+        status.stringValue = "Waiting for your main Mac…"
         home.makeKeyAndOrderFront(nil)
     }
 
     @objc private func toggleLogin(_ sender: NSButton) { LoginItem.set(sender.state == .on) }
+    @objc private func toggleAwake(_ sender: NSButton) { KeepAwake.preferred = sender.state == .on }
+    @objc private func switchRole() { onSwitchMode?() }
 }
-
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.setActivationPolicy(.regular)
-app.run()

@@ -1,7 +1,6 @@
-// System integration: AirDrop (awdl0 interface), login item, screen capture permission.
+// System integration: AirDrop (awdl0 interface), screen capture and local network permissions.
 import AppKit
 import ScreenCaptureKit
-import ServiceManagement
 
 // AirDrop makes Wi-Fi hop channels several times per second, which causes stutter.
 // We take its interface (awdl0) down while streaming and bring it back up afterwards.
@@ -55,16 +54,7 @@ enum AirDrop {
     }
 }
 
-enum LoginItem {
-    static var enabled: Bool { SMAppService.mainApp.status == .enabled }
-
-    static func set(_ on: Bool) {
-        do {
-            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-        } catch { log("login item: \(error.localizedDescription)") }
-    }
-}
-
+@available(macOS 14.0, *)
 enum ScreenPermission {
     static var granted: Bool { CGPreflightScreenCaptureAccess() }
 
@@ -82,5 +72,11 @@ enum ScreenPermission {
                 }
             }
         }
+    }
+}
+
+enum LocalNetwork {
+    static func openSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")!)
     }
 }

@@ -1,10 +1,11 @@
 // Streams the mouse pointer separately from the video, so it moves with network latency only
 // instead of waiting for capture, encoding and decoding. The receiver draws it on top of the picture.
 //   position: UDP datagrams, 120 per second  [u8 6][u16 seq][u16 x][u16 y][u8 visible]  (x, y normalized to 0…65535)
-//   shape:    TCP message type 7 when it changes  [u16 hotX*16][u16 hotY*16][u16 w*16][u16 h*16][PNG]  (points)
+//   shape:    TCP message type 7 when it changes  [u16 hotX*16][u16 hotY*16][u16 w*16][u16 h*16][PNG]  (stream pixels)
 import AppKit
 import Network
 
+@available(macOS 14.0, *)
 final class CursorStreamer {
     private let displayID: CGDirectDisplayID
     private let link: Link
@@ -23,7 +24,7 @@ final class CursorStreamer {
 
     func start() {
         guard let host = link.remoteHost else { log("cursor: unknown receiver address"); return }
-        let c = NWConnection(host: host, port: 7778, using: .udp)
+        let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: .udp)
         c.start(queue: q)
         udp = c
         let t = DispatchSource.makeTimerSource(queue: q)
@@ -59,7 +60,11 @@ final class CursorStreamer {
         guard let cursor = NSCursor.currentSystem, let tiff = cursor.image.tiffRepresentation else { return }
         let h = tiff.hashValue
         guard h != shapeHash, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
-        let size = cursor.image.size, hot = cursor.hotSpot
+        // Points → stream pixels (2 on a HiDPI virtual display), so the receiver needs no extra info.
+        let b = CGDisplayBounds(displayID)
+        let px = b.width > 0 ? CGFloat(CGDisplayPixelsWide(displayID)) / b.width : 1
+        let size = CGSize(width: cursor.image.size.width * px, height: cursor.image.size.height * px)
+        let hot = CGPoint(x: cursor.hotSpot.x * px, y: cursor.hotSpot.y * px)
         var p = Data()
         for v in [hot.x, hot.y, size.width, size.height] {
             let u = UInt16(max(0, min(65535, (v * 16).rounded())))

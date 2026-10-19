@@ -2,9 +2,10 @@
 import AppKit
 import SwiftUI
 
-enum Brand {
-    static let orange = Color(red: 1.0, green: 0.70, blue: 0.28)   // #FFB347
-    static let coral = Color(red: 1.0, green: 0.42, blue: 0.42)    // #FF6B6B
+@available(macOS 12.0, *)
+extension Brand {
+    static let orangeUI = Color(nsColor: orange)
+    static let coralUI = Color(nsColor: coral)
 
     // Smiling screen, 18 pt. Filled when streaming.
     static func menuBarIcon(active: Bool) -> NSImage {

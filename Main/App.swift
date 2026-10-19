@@ -3,10 +3,14 @@ import AppKit
 import Network
 import SwiftUI
 
+@available(macOS 14.0, *)
 final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @Published var receivers: [String: NWEndpoint] = [:]
     @Published var activeName: String?
     @Published var lastError: String?
+    @Published var localNetworkDenied = false
+    @Published var browsing = false
+    var onSwitchMode: (() -> Void)?
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var browser: NWBrowser?
@@ -35,6 +39,10 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         Hotkey.register { [weak self] in self?.toggleStreaming() }
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
+        if !defaults.bool(forKey: "mainConfigured") {
+            LoginItem.set(true)
+            defaults.set(true, forKey: "mainConfigured")
+        }
     }
 
     // MARK: Discovery
@@ -49,7 +57,20 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.receivers = found
+                if !found.isEmpty { self.localNetworkDenied = false }
                 self.autoConnect()
+            }
+        }
+        // Bonjour reports a policy error when macOS denies Local Network access (kDNSServiceErr_PolicyDenied).
+        b.stateUpdateHandler = { [weak self] st in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch st {
+                case .ready: self.browsing = true
+                case .waiting(let e), .failed(let e):
+                    if case let .dns(code) = e, code == -65570 { self.localNetworkDenied = true }
+                default: break
+                }
             }
         }
         b.start(queue: .main)
@@ -80,11 +101,13 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             self.airDropGuard?.invalidate()
             self.airDropGuard = nil
             if let reason { self.lastError = reason }
+            if reason == Messages.localNetwork { self.localNetworkDenied = true }
             if self.cutAirDrop { AirDrop.set(enabled: true) }
             self.updateIcon()
             // Unexpected drop (sleep, Wi-Fi): retry while the receiver is still advertised.
-            if !self.userStopped && reason == nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.autoConnect() }
+            // Also keep retrying while macOS blocks Local Network: it works as soon as the user allows it.
+            if !self.userStopped && (reason == nil || reason == Messages.localNetwork) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (reason == nil ? 2 : 5)) { self.autoConnect() }
             }
         }
         session = s
@@ -120,6 +143,11 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         else { status = "Not streaming" }
         menu.addItem(disabled(status))
         if let err = lastError { menu.addItem(disabled("⚠︎ " + err)) }
+        if localNetworkDenied || lastError == Messages.localNetwork {
+            let fix = NSMenuItem(title: "Open Local Network Settings…", action: #selector(openLocalNetwork), keyEquivalent: "")
+            fix.target = self
+            menu.addItem(fix)
+        }
 
         // The one-click action: unplug or plug back the extra screen.
         if session != nil {
@@ -139,7 +167,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(disabled("Available screens"))
         if receivers.isEmpty {
-            menu.addItem(disabled("No receiver found on the network"))
+            menu.addItem(disabled("None yet: open SpareScreen on your other Mac"))
         }
         for name in receivers.keys.sorted() {
             let item = NSMenuItem(title: name, action: #selector(toggleReceiver(_:)), keyEquivalent: "")
@@ -162,6 +190,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         let setup = NSMenuItem(title: "Setup Assistant…", action: #selector(openOnboarding), keyEquivalent: "")
         setup.target = self
         menu.addItem(setup)
+        let role = NSMenuItem(title: "Switch Role…", action: #selector(switchRole), keyEquivalent: "")
+        role.target = self
+        menu.addItem(role)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit SpareScreen", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -193,6 +224,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @objc private func toggleLogin() { LoginItem.set(!LoginItem.enabled) }
 
     @objc private func openOnboarding() { showOnboarding() }
+    @objc private func openLocalNetwork() { LocalNetwork.openSettings() }
+    @objc func switchRole() {
+        session?.stop()
+        if cutAirDrop { AirDrop.set(enabled: true) }
+        onSwitchMode?()
+    }
 
     @objc private func quit() {
         session?.stop()
@@ -204,7 +241,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     func showOnboarding() {
         if onboardingWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 720),
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
             w.title = "SpareScreen"
             w.titlebarAppearsTransparent = true
@@ -227,6 +264,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 }
 
+@available(macOS 14.0, *)
 struct OnboardingView: View {
     @ObservedObject var controller: Controller
     let close: () -> Void
@@ -238,32 +276,43 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            VStack(alignment: .leading, spacing: 14) {
-                step(1, "Allow screen recording",
-                     "SpareScreen sends the picture of your extra screen to the other device.",
+            VStack(alignment: .leading, spacing: 12) {
+                step(1, "Let SpareScreen show your extra screen",
+                     "macOS asks for Screen Recording. SpareScreen only sends the extra screen to your other Mac.",
                      done: screenOK, button: "Allow") { ScreenPermission.request() }
-                step(2, "Open SpareScreen Receiver on the other device",
-                     receivers.isEmpty ? "Any Mac running macOS 10.15 or later, on the same Wi-Fi. Looking for it…"
-                                       : "Found \(receivers.joined(separator: ", ")).",
-                     done: !receivers.isEmpty, button: nil, searching: receivers.isEmpty) {}
-                step(3, "Make it smooth",
-                     "Pauses AirDrop while streaming, so Wi-Fi stays steady. Asks for your password once.",
+                step(2, "Let it find your other Mac",
+                     controller.localNetworkDenied
+                        ? "macOS is blocking the local network. Turn on SpareScreen in Local Network settings."
+                        : "macOS may ask to find devices on your network. Click Allow.",
+                     done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil) { LocalNetwork.openSettings() }
+                step(3, "Set up your extra screen",
+                     receivers.isEmpty ? "On the other Mac, open SpareScreen and choose \u{201C}Make this an extra screen\u{201D}. Same Wi-Fi."
+                                       : "Found \(receivers.joined(separator: ", ")). You're all set.",
+                     done: !receivers.isEmpty, button: nil, searching: receivers.isEmpty && !controller.localNetworkDenied) {}
+                step(4, "Make it smooth",
+                     "Pauses AirDrop while you use the extra screen, so Wi-Fi stays steady. Asks for your password once.",
                      done: airDropOK, button: "Enable") { AirDrop.installHelper(); airDropOK = AirDrop.helperInstalled }
                 Toggle("Open SpareScreen at login", isOn: $login)
                     .toggleStyle(.checkbox)
                     .onChange(of: login) { _, on in LoginItem.set(on) }
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                 Button {
                     if controller.lastReceiver == nil, let first = receivers.first { controller.lastReceiver = first }
                     controller.finishOnboarding()
                 } label: {
-                    Text(receivers.isEmpty ? "Done" : "Start streaming").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    Text(receivers.isEmpty ? "Done" : "Start using \(receivers[0])").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Brand.coral)
+                .tint(Brand.coralUI)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-                .padding(.top, 6)
+                .padding(.top, 4)
+                HStack {
+                    Spacer()
+                    Button("Use this Mac differently…") { controller.switchRole() }
+                        .buttonStyle(.link).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer()
+                }
             }
             .padding(24)
         }
@@ -271,18 +320,20 @@ struct OnboardingView: View {
         .onReceive(timer) { _ in screenOK = ScreenPermission.granted }
     }
 
+    private var networkOK: Bool { !controller.receivers.isEmpty || (controller.browsing && !controller.localNetworkDenied) }
+
     private var header: some View {
         ZStack {
-            LinearGradient(colors: [Brand.orange, Brand.coral], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [Brand.orangeUI, Brand.coralUI], startPoint: .topLeading, endPoint: .bottomTrailing)
             VStack(spacing: 8) {
                 Image(nsImage: NSApp.applicationIconImage)
-                    .resizable().frame(width: 112, height: 112)
+                    .resizable().frame(width: 96, height: 96)
                     .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
-                Text("SpareScreen").font(.system(size: 30, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text("Turn any device into an extra screen for your Mac.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.92))
+                Text("Your main Mac").font(.system(size: 28, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text("Four quick steps and your other Mac becomes an extra screen.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.92))
             }
-            .padding(.top, 34).padding(.bottom, 22)
+            .padding(.top, 34).padding(.bottom, 20)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -294,11 +345,11 @@ struct OnboardingView: View {
                       searching: Bool = false, action: @escaping () -> Void) -> some View {
         HStack(alignment: .center, spacing: 14) {
             ZStack {
-                Circle().fill(done ? Color.green : Brand.coral.opacity(0.15)).frame(width: 34, height: 34)
+                Circle().fill(done ? Color.green : Brand.coralUI.opacity(0.15)).frame(width: 32, height: 32)
                 if done {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                 } else {
-                    Text("\(n)").font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(Brand.coral)
+                    Text("\(n)").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(Brand.coralUI)
                 }
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -308,10 +359,10 @@ struct OnboardingView: View {
             Spacer(minLength: 8)
             if searching { ProgressView().controlSize(.small) }
             if let button, !done {
-                Button(button, action: action).buttonStyle(.borderedProminent).tint(Brand.coral)
+                Button(button, action: action).buttonStyle(.borderedProminent).tint(Brand.coralUI)
             }
         }
-        .padding(14)
+        .padding(12)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.04)))
     }
 }
