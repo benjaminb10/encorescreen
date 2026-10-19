@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let m = NSMenu()
         m.addItem(withTitle: "About Encore Screen", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         m.addItem(.separator())
-        m.addItem(withTitle: "Switch Role…", action: #selector(switchMode), keyEquivalent: "")
+        m.addItem(withTitle: "Change What This Mac Does…", action: #selector(switchMode), keyEquivalent: "")
         m.addItem(.separator())
         m.addItem(withTitle: "Hide Encore Screen", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         m.addItem(withTitle: "Quit Encore Screen", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

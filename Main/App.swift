@@ -266,7 +266,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         sub.addItem(login)
         sub.addItem(.separator())
         sub.addItem(item("Setup Assistant…", #selector(openOnboarding)))
-        sub.addItem(item("Switch Role…", #selector(switchRole)))
+        sub.addItem(item("Use This Mac as an Extra Screen Instead…", #selector(switchRole)))
         settings.submenu = sub
         menu.addItem(settings)
         menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))

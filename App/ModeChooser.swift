@@ -73,7 +73,7 @@ final class ModeChooser: NSObject {
         screen.onClick = { [weak self] in self?.onChoose?(.screen) }
         let cards = NSStackView(views: [main, screen])
         cards.spacing = 16
-        let footer = label("You'll need Encore Screen on both Macs. You can switch roles later from the menu.",
+        let footer = label("You'll need Encore Screen on both Macs. You can change this later from the menu.",
                            size: 11, color: .tertiaryLabelColor)
 
         let body = NSStackView(views: [question, cards, footer])
