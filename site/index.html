@@ -98,8 +98,13 @@ dialog.tip::backdrop{background:rgba(20,16,35,.55);backdrop-filter:blur(4px)}
 .tip-in h3{font-size:26px;font-weight:900;margin:0 0 6px}
 .tip-in p{color:var(--muted);margin:0 0 18px}
 .amounts{display:flex;gap:8px;justify-content:center;margin-bottom:18px;flex-wrap:wrap}
-.amounts span{padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-weight:600}
-.amounts span.on{background:rgba(255,107,107,.12);border-color:var(--coral);color:var(--coral)}
+.amounts button,.amounts .custom{padding:9px 14px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--ink);font:600 15px Inter,system-ui,sans-serif;cursor:pointer}
+.amounts button.on{background:rgba(255,107,107,.12);border-color:var(--coral);color:var(--coral)}
+.amounts .custom{display:inline-flex;align-items:center;gap:4px;cursor:text}
+.amounts .custom input{width:64px;border:0;background:none;color:inherit;font:inherit;outline:none}
+.tip-in .btn:disabled{opacity:.6;transform:none;cursor:default}
+dialog.tip.wide{width:min(560px,calc(100vw - 16px))}
+#tip-pay{padding:44px 8px 8px;max-height:85vh;overflow:auto}
 .tip-in .btn{width:100%;justify-content:center}
 .tip-in small{display:block;color:var(--muted);margin-top:12px;font-size:12.5px}
 .tip-x{position:absolute;top:12px;right:14px;background:none;border:0;font-size:22px;color:var(--muted);cursor:pointer}
@@ -198,18 +203,51 @@ dialog.tip::backdrop{background:rgba(20,16,35,.55);backdrop-filter:blur(4px)}
 
 <dialog class="tip" id="tip">
   <button class="tip-x" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
-  <div class="tip-in">
+  <div class="tip-in" id="tip-pick">
     <img src="icon-256.png" alt="">
     <h3>Buy me a coffee ☕</h3>
     <p>Encore Screen is free. If it gave your old Mac a second life, any amount keeps it going.</p>
-    <div class="amounts"><span class="on">€5 suggested</span><span>or any amount from €1</span></div>
-    <a class="btn btn-primary" href="/support" target="_blank" rel="noopener">Choose my amount</a>
+    <div class="amounts" id="amounts">
+      <button type="button" data-a="3">€3</button><button type="button" data-a="5" class="on">€5</button><button type="button" data-a="10">€10</button>
+      <label class="custom">€<input id="custom" type="number" min="1" max="500" step="1" placeholder="Other" inputmode="decimal"></label>
+    </div>
+    <button class="btn btn-primary" id="tip-go" type="button">Support with €5</button>
     <small>Secure payment by Stripe · Apple Pay, Google Pay, cards</small>
+  </div>
+  <div id="tip-pay" hidden><div id="checkout"></div></div>
+  <div class="tip-in" id="tip-thanks" hidden>
+    <img src="icon-256.png" alt="">
+    <h3>Thank you! 💛</h3>
+    <p>Your support keeps Encore Screen free for everyone. Your receipt is on its way by email.</p>
+    <button class="btn btn-primary" type="button" onclick="this.closest('dialog').close()">Back to the site</button>
   </div>
 </dialog>
 <script>
-document.querySelectorAll('[data-support]').forEach(function(a){a.addEventListener('click',function(e){var d=document.getElementById('tip');if(d&&d.showModal){e.preventDefault();d.showModal()}})})
-document.getElementById('tip').addEventListener('click',function(e){if(e.target===this)this.close()})
+(function(){
+  var d=document.getElementById('tip'), amount=5, go=document.getElementById('tip-go'), custom=document.getElementById('custom'), checkout=null
+  function show(id){['tip-pick','tip-pay','tip-thanks'].forEach(function(x){document.getElementById(x).hidden=(x!==id)});d.classList.toggle('wide',id==='tip-pay')}
+  function setAmount(a){amount=a;go.textContent=a>=1?'Support with €'+a:'Choose an amount';go.disabled=!(a>=1&&a<=500)}
+  document.querySelectorAll('#amounts button').forEach(function(b){b.addEventListener('click',function(){
+    document.querySelectorAll('#amounts button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');custom.value='';setAmount(Number(b.dataset.a))})})
+  custom.addEventListener('input',function(){document.querySelectorAll('#amounts button').forEach(function(x){x.classList.remove('on')});setAmount(Math.round(Number(custom.value)))})
+  function fallback(){window.open('/support','_blank','noopener')}
+  function loadStripe(){return window.Stripe?Promise.resolve():new Promise(function(ok,ko){var s=document.createElement('script');s.src='https://js.stripe.com/v3/';s.onload=ok;s.onerror=ko;document.head.appendChild(s)})}
+  go.addEventListener('click',function(){
+    go.disabled=true;go.textContent='Loading…'
+    fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amount})})
+      .then(function(r){if(!r.ok)throw 0;return r.json()})
+      .then(function(j){return loadStripe().then(function(){
+        if(checkout){checkout.destroy();checkout=null}
+        return Stripe(j.publishableKey).initEmbeddedCheckout({fetchClientSecret:function(){return Promise.resolve(j.clientSecret)}})})})
+      .then(function(c){checkout=c;show('tip-pay');c.mount('#checkout')})
+      .catch(function(){fallback()})
+      .finally(function(){setAmount(amount)})
+  })
+  document.querySelectorAll('[data-support]').forEach(function(a){a.addEventListener('click',function(e){if(d.showModal){e.preventDefault();show('tip-pick');d.showModal()}})})
+  d.addEventListener('click',function(e){if(e.target===d)d.close()})
+  d.addEventListener('close',function(){if(checkout){checkout.destroy();checkout=null}})
+  if(/[?&]thanks=1/.test(location.search)&&d.showModal){show('tip-thanks');d.showModal();history.replaceState(null,'',location.pathname)}
+})()
 </script>
 </body>
 </html>
