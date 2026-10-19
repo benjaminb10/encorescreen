@@ -3,3 +3,4 @@ build/
 *.iconset/
 site/EncoreScreen.dmg
 site/node_modules
+site/launch.mp4
