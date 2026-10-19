@@ -237,7 +237,12 @@ enum WebPage {
     static let html = #"""
 <!doctype html>
 <html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Encore Screen">
+<meta name="theme-color" content="#000000">
 <title>Encore Screen</title>
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden}
@@ -247,16 +252,25 @@ canvas{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;cursor:n
  color:#fff;font:600 20px -apple-system,system-ui,sans-serif;text-align:center;padding:24px;
  background:linear-gradient(135deg,#FFB347,#FF6B6B);cursor:pointer}
 #msg small{font-weight:400;font-size:14px;opacity:.9}
+#tip{font-weight:400;font-size:13px;opacity:.85;max-width:320px;margin-top:8px}
 </style></head>
-<body><canvas id="v"></canvas><img id="p"><div id="msg">Tap to start<small>This screen becomes your Mac's extra screen.</small></div>
+<body><canvas id="v"></canvas><img id="p"><div id="msg"></div>
 <script>
 const msg=document.getElementById('msg'),cv=document.getElementById('v'),ctx=cv.getContext('2d'),ptr=document.getElementById('p');
+let sent=null,resizeTimer;
+// Rotation or resize: reconnect so the Mac recreates the extra screen at the new size.
+addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
+ if(!sent||!ws||ws.readyState!==1)return;if(Math.abs(innerWidth-sent[0])<40&&Math.abs(innerHeight-sent[1])<40)return;
+ ws.onclose=null;ws.close();cfg='';needKey=true;vw=0;connect()},700)});
 let ws,dec,cfg='',needKey=true,vw=0,vh=0,hot=[0,0],ps=[0,0],ts=0,denied=false;
 const key=(location.hash.match(/k=([a-z0-9]+)/)||[])[1]||'';
 let id=localStorage.getItem('es-id');if(!id){id=crypto.getRandomValues(new Uint32Array(4)).join('-');localStorage.setItem('es-id',id)}
 const ua=navigator.userAgent,name=/iPad/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1)?'iPad':/iPhone/.test(ua)?'iPhone':
  /Android/.test(ua)?'Android device':/Windows/.test(ua)?'Windows PC':/CrOS/.test(ua)?'Chromebook':/Macintosh/.test(ua)?'Mac':'Browser';
-function say(t,s){msg.innerHTML=t+(s?'<small>'+s+'</small>':'');msg.style.display='flex'}
+const standalone=navigator.standalone||matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches;
+const tip=(/iPhone|iPod/.test(navigator.userAgent)&&!standalone)?'<div id="tip">For a true full screen: tap Share, then \u201CAdd to Home Screen\u201D, and open Encore Screen from there.</div>':'';
+function say(t,s){msg.innerHTML=t+(s?'<small>'+s+'</small>':'')+tip;msg.style.display='flex'}
+say('Tap to start','This screen becomes your Mac\'s extra screen.');
 if(!key) say('Scan the QR code on your Mac','Open Encore Screen\'s menu on your Mac, then \u201CAdd Any Device with a Browser\u201D.');
 else if(!('VideoDecoder' in window)) say('This browser can\'t show the screen here','Use a recent Chrome or Safari. On this page, video decoding needs a secure connection.');
 msg.onclick=()=>{if(!key||!('VideoDecoder' in window))return;denied=false;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
@@ -265,7 +279,8 @@ function connect(){
  msg.style.display='none';
  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.hostname+':7791');ws.binaryType='arraybuffer';
  ws.onopen=()=>{const d=window.devicePixelRatio||1;
-  ws.send(JSON.stringify({w:Math.round(screen.width*d),h:Math.round(screen.height*d),scale:d>=1.5?2:1,key,id,name}));
+  sent=[innerWidth,innerHeight];
+  ws.send(JSON.stringify({w:Math.round(innerWidth*d),h:Math.round(innerHeight*d),scale:d>=1.5?2:1,key,id,name}));
   say('Waiting for your Mac to allow this '+name+'…','Click \u201CAllow\u201D on your Mac.')};
  ws.onclose=()=>{cfg='';needKey=true;if(denied){say('Not allowed','This link is out of date, or the device was refused on the Mac. Scan the QR code again.');return}
   say('Waiting for your Mac…','Reconnecting');setTimeout(connect,2000)};
