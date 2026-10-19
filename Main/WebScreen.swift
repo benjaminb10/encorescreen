@@ -297,7 +297,8 @@ say('Tap to start','This screen becomes your Mac\'s extra screen.');
 if(!key) say('Scan the QR code on your Mac','Open Encore Screen\'s menu on your Mac, then \u201CAdd Any Device with a Browser\u201D.');
 else if(!('VideoDecoder' in window)) say('This browser can\'t show the screen here','Use a recent Chrome or Safari. On this page, video decoding needs a secure connection.');
 msg.onclick=()=>{if(!key||!('VideoDecoder' in window))return;denied=false;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
-if(location.search.includes('auto')&&key&&('VideoDecoder' in window))connect();
+// Auto-start (kiosk use): after the whole script has run, so every variable below is initialized.
+if(location.search.includes('auto')&&key&&('VideoDecoder' in window))setTimeout(connect,0);
 const VERSION='__VERSION__';
 // The Mac sends a heartbeat every second while streaming. Four seconds of silence means the connection died
 // without a proper close (the Mac app restarted, Wi-Fi dropped): reconnect instead of staying frozen.
