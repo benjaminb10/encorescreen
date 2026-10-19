@@ -9,7 +9,7 @@ import Network
 final class CursorStreamer {
     private let displayID: CGDirectDisplayID
     private let link: Link
-    private let q = DispatchQueue(label: "sparescreen.cursor", qos: .userInteractive)
+    private let q = DispatchQueue(label: "encorescreen.cursor", qos: .userInteractive)
     private var udp: NWConnection?
     private var timer: DispatchSourceTimer?
     private var seq: UInt16 = 0

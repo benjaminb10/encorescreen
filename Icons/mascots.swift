@@ -133,7 +133,7 @@ let c = canvas {
 }
 
 for (name, rep) in [("concept-A-copain", a), ("concept-B-duo", b), ("concept-C-seconde-vie", c),
-                    ("SpareScreen-1024", a), ("SpareScreenReceiver-1024", buddy(receiver: true))] {
+                    ("EncoreScreen-1024", a), ("EncoreScreenReceiver-1024", buddy(receiver: true))] {
     try rep.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent("\(name).png"))
 }
 print("ok")

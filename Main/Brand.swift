@@ -28,7 +28,7 @@ extension Brand {
             return true
         }
         img.isTemplate = true
-        img.accessibilityDescription = "SpareScreen"
+        img.accessibilityDescription = "Encore Screen"
         return img
     }
 }

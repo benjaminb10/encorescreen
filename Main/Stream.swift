@@ -39,7 +39,7 @@ final class VirtualScreen {
 @available(macOS 14.0, *)
 final class Link {
     let conn: NWConnection
-    private let q = DispatchQueue(label: "sparescreen.link", qos: .userInteractive)
+    private let q = DispatchQueue(label: "encorescreen.link", qos: .userInteractive)
     private var inflight = 0
     private var closed = false
     var onHello: ((Int, Int, CGSize, Int) -> Void)?
@@ -204,7 +204,7 @@ final class Encoder {
 }
 
 enum Messages {
-    static let localNetwork = "macOS is blocking the connection. Turn on SpareScreen in System Settings > Privacy & Security > Local Network."
+    static let localNetwork = "macOS is blocking the connection. Turn on Encore Screen in System Settings > Privacy & Security > Local Network."
 }
 
 // One session = one connection to a receiver, with its own virtual display.
@@ -277,10 +277,10 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                 encoder = enc
                 let s = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: cfg, delegate: self)
                 do {
-                    try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "sparescreen.capture", qos: .userInteractive))
+                    try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "encorescreen.capture", qos: .userInteractive))
                     try await s.startCapture()
                 } catch {
-                    endReason = "Cannot capture the screen: allow SpareScreen in System Settings > Privacy & Security > Screen Recording."
+                    endReason = "Cannot capture the screen: allow Encore Screen in System Settings > Privacy & Security > Screen Recording."
                     log("capture failed: \(error.localizedDescription)")
                     link.stop(); return
                 }

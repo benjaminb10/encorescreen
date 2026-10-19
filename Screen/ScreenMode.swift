@@ -9,7 +9,7 @@ final class Receiver {
     private var listener: NWListener?
     private var conn: NWConnection?
     private var format: CMVideoFormatDescription?
-    private let q = DispatchQueue(label: "sparescreen.recv", qos: .userInteractive)
+    private let q = DispatchQueue(label: "encorescreen.recv", qos: .userInteractive)
     private var lastReceived = Date()
     private var watchdog: DispatchSourceTimer?
     var onConnect: ((String) -> Void)?
@@ -251,7 +251,7 @@ final class ScreenController: NSObject {
     private func buildHome() {
         home = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 600),
                         styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
-        home.title = "SpareScreen"
+        home.title = "Encore Screen"
         home.titlebarAppearsTransparent = true
         home.titleVisibility = .hidden
         home.isReleasedWhenClosed = false
@@ -262,7 +262,7 @@ final class ScreenController: NSObject {
         let statusRow = NSStackView(views: [PulseDot(), status])
         statusRow.spacing = 8
 
-        let login = NSButton(checkboxWithTitle: "Open SpareScreen at login", target: self, action: #selector(toggleLogin(_:)))
+        let login = NSButton(checkboxWithTitle: "Open Encore Screen at login", target: self, action: #selector(toggleLogin(_:)))
         login.state = LoginItem.enabled ? .on : .off
         let awake = NSButton(checkboxWithTitle: "Keep this Mac awake, so it's always ready", target: self, action: #selector(toggleAwake(_:)))
         awake.state = KeepAwake.preferred ? .on : .off
@@ -270,7 +270,7 @@ final class ScreenController: NSObject {
         let switchRole = linkButton("Use this Mac differently…", target: self, action: #selector(switchRole))
 
         let body = NSStackView(views: [
-            numberedRow(1, "Open SpareScreen on your main Mac", "Same app, same Wi-Fi. Choose \u{201C}This is my main Mac\u{201D}."),
+            numberedRow(1, "Open Encore Screen on your main Mac", "Same app, same Wi-Fi. Choose \u{201C}This is my main Mac\u{201D}."),
             numberedRow(2, "Pick \u{201C}\(name)\u{201D}", "From the smiling screen in your main Mac's menu bar."),
             numberedRow(3, "That's it", "This screen fills up with your extra desktop. Press Esc to come back here."),
             statusRow, login, awake, info, switchRole,
@@ -320,7 +320,7 @@ final class ScreenController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         NSCursor.hide()
-        activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .latencyCritical], reason: "SpareScreen")
+        activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .latencyCritical], reason: "Encore Screen")
     }
 
     // Where the video sits inside the full screen window (aspect fit), in layer coordinates (origin bottom-left).

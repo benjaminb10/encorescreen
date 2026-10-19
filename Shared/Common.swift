@@ -1,10 +1,10 @@
 // Shared by both modes. Everything here runs on macOS 10.15 Catalina.
 import AppKit
 
-func log(_ s: String) { NSLog("[SpareScreen] %@", s) }
+func log(_ s: String) { NSLog("[Encore Screen] %@", s) }
 
 enum Proto {
-    static let serviceType = "_sparescreen._tcp"
+    static let serviceType = "_encorescreen._tcp"
     static let videoPort: UInt16 = 7777
     static let cursorPort: UInt16 = 7778
     static let params: UInt8 = 1       // main → screen: SPS + PPS
@@ -38,7 +38,7 @@ enum Brand {
 
 // Open at login through a LaunchAgent (works on every macOS version we support).
 enum LoginItem {
-    static let label = "app.sparescreen"
+    static let label = "app.encorescreen"
     static var url: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
     }
@@ -59,7 +59,7 @@ enum LoginItem {
     }
 }
 
-// Keeps the Mac and its display awake while SpareScreen runs in screen mode.
+// Keeps the Mac and its display awake while Encore Screen runs in screen mode.
 enum KeepAwake {
     private static var token: NSObjectProtocol?
     static var preferred: Bool {
@@ -70,7 +70,7 @@ enum KeepAwake {
     static func apply() {
         if preferred, token == nil {
             token = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .idleDisplaySleepDisabled],
-                                                          reason: "SpareScreen keeps this screen ready")
+                                                          reason: "Encore Screen keeps this screen ready")
         } else if !preferred, let t = token {
             ProcessInfo.processInfo.endActivity(t)
             token = nil

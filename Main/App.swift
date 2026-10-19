@@ -38,7 +38,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         updateIcon()
-        statusItem.autosaveName = "SpareScreenStatusItem"
+        statusItem.autosaveName = "EncoreScreenStatusItem"
         Hotkey.register { [weak self] in self?.toggleStreaming() }
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
@@ -176,7 +176,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let title = NSMenuItem(title: "SpareScreen", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "Encore Screen", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
         let status: String
@@ -208,7 +208,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(disabled("Available screens"))
         if receivers.isEmpty {
-            menu.addItem(disabled("None yet: open SpareScreen on your other Mac"))
+            menu.addItem(disabled("None yet: open Encore Screen on your other Mac"))
         }
         for name in receivers.keys.sorted() {
             let item = NSMenuItem(title: name, action: #selector(toggleReceiver(_:)), keyEquivalent: "")
@@ -235,7 +235,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         role.target = self
         menu.addItem(role)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit SpareScreen", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Encore Screen", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
@@ -284,7 +284,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         if onboardingWindow == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 720),
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
-            w.title = "SpareScreen"
+            w.title = "Encore Screen"
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
             w.isReleasedWhenClosed = false
@@ -319,10 +319,10 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             header
             VStack(alignment: .leading, spacing: 12) {
-                step(1, "Let SpareScreen show your extra screen",
+                step(1, "Let Encore Screen show your extra screen",
                      askedScreen
-                        ? "Turn on SpareScreen in the list that just opened. Not there? Drag SpareScreen from Finder into the list."
-                        : "macOS asks for Screen Recording. SpareScreen only sends the extra screen to your other Mac.",
+                        ? "Turn on Encore Screen in the list that just opened. Not there? Drag Encore Screen from Finder into the list."
+                        : "macOS asks for Screen Recording. Encore Screen only sends the extra screen to your other Mac.",
                      done: screenOK, button: askedScreen ? "Show in Finder" : "Allow") {
                     if askedScreen {
                         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
@@ -333,19 +333,19 @@ struct OnboardingView: View {
                 }
                 step(2, "Let it find your other Mac",
                      controller.localNetworkDenied
-                        ? "macOS is blocking the connection. Turn on SpareScreen in Local Network settings."
+                        ? "macOS is blocking the connection. Turn on Encore Screen in Local Network settings."
                         : controller.receivers.isEmpty ? "macOS may ask to find devices on your network. Click Allow."
-                                                       : "Checking that macOS lets SpareScreen connect…",
+                                                       : "Checking that macOS lets Encore Screen connect…",
                      done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil,
                      searching: !networkOK && !controller.localNetworkDenied && !controller.receivers.isEmpty) { LocalNetwork.openSettings() }
                 step(3, "Set up your extra screen",
-                     receivers.isEmpty ? "On the other Mac, open SpareScreen and choose \u{201C}Make this an extra screen\u{201D}. Same Wi-Fi."
+                     receivers.isEmpty ? "On the other Mac, open Encore Screen and choose \u{201C}Make this an extra screen\u{201D}. Same Wi-Fi."
                                        : "Found \(receivers.joined(separator: ", ")). You're all set.",
                      done: !receivers.isEmpty, button: nil, searching: receivers.isEmpty && !controller.localNetworkDenied) {}
                 step(4, "Make it smooth",
                      "Pauses AirDrop while you use the extra screen, so Wi-Fi stays steady. Asks for your password once.",
                      done: airDropOK, button: "Enable") { AirDrop.installHelper(); airDropOK = AirDrop.helperInstalled }
-                Toggle("Open SpareScreen at login", isOn: $login)
+                Toggle("Open Encore Screen at login", isOn: $login)
                     .toggleStyle(.checkbox)
                     .onChange(of: login) { _, on in LoginItem.set(on) }
                     .padding(.top, 2)

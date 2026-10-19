@@ -7,7 +7,7 @@ import ScreenCaptureKit
 // We take its interface (awdl0) down while streaming and bring it back up afterwards.
 // To avoid a password prompt every time, onboarding installs a sudo rule limited to these two commands.
 enum AirDrop {
-    static let sudoersPath = "/etc/sudoers.d/sparescreen"
+    static let sudoersPath = "/etc/sudoers.d/encorescreen"
 
     static var helperInstalled: Bool { FileManager.default.fileExists(atPath: sudoersPath) }
 
@@ -15,7 +15,7 @@ enum AirDrop {
     static func installHelper() -> Bool {
         let user = NSUserName()
         let rule = "\(user) ALL=(root) NOPASSWD: /sbin/ifconfig awdl0 down, /sbin/ifconfig awdl0 up"
-        let tmp = "/tmp/sparescreen-sudoers"
+        let tmp = "/tmp/encorescreen-sudoers"
         let shell = "printf '%s\\n' '\(rule)' > \(tmp) && /usr/sbin/visudo -cf \(tmp) && "
             + "/usr/bin/install -m 0440 -o root -g wheel \(tmp) \(sudoersPath); rm -f \(tmp)"
         return runAsAdmin(shell)
@@ -60,11 +60,11 @@ enum ScreenPermission {
     static var granted: Bool { CGPreflightScreenCaptureAccess() }
 
     // Touching ScreenCaptureKit registers the app in System Settings and shows the system prompt.
-    // Settings only opens if access is still missing a moment later, with SpareScreen already listed.
+    // Settings only opens if access is still missing a moment later, with Encore Screen already listed.
     private static var probe: AVCaptureSession?
 
     // macOS only lists an app under Screen Recording once it has really tried to capture.
-    // So we ask, then start a one-second capture of the main display: that registers SpareScreen
+    // So we ask, then start a one-second capture of the main display: that registers Encore Screen
     // in System Settings (switched off, ready to be turned on) and shows the system prompt.
     static func request() {
         let askedBefore = UserDefaults.standard.bool(forKey: "screenPromptShown")

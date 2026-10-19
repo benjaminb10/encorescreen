@@ -54,12 +54,12 @@ final class ModeChooser: NSObject {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 520),
                           styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         super.init()
-        window.title = "SpareScreen"
+        window.title = "Encore Screen"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
 
-        let header = brandHeader(title: "Welcome to SpareScreen", tagline: "Give your Mac a second screen, using a Mac you already own.")
+        let header = brandHeader(title: "Welcome to Encore Screen", tagline: "Give your old Mac an encore: it becomes your extra screen.")
         let question = label("How will you use this Mac?", size: 15, weight: .semibold)
 
         let main = ChoiceCard(emoji: "💻", title: "This is my main Mac",
@@ -73,7 +73,7 @@ final class ModeChooser: NSObject {
         screen.onClick = { [weak self] in self?.onChoose?(.screen) }
         let cards = NSStackView(views: [main, screen])
         cards.spacing = 16
-        let footer = label("You'll need SpareScreen on both Macs. You can switch roles later from the menu.",
+        let footer = label("You'll need Encore Screen on both Macs. You can switch roles later from the menu.",
                            size: 11, color: .tertiaryLabelColor)
 
         let body = NSStackView(views: [question, cards, footer])
