@@ -193,9 +193,11 @@ final class WebScreenServer: ObservableObject {
 
     private func servePage(_ c: NWConnection) {
         c.start(queue: q)
-        c.receive(minimumIncompleteLength: 1, maximumLength: 64 << 10) { _, _, _, _ in
-            let body = Data(WebPage.html.utf8)
-            var head = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n"
+        c.receive(minimumIncompleteLength: 1, maximumLength: 64 << 10) { req, _, _, _ in
+            let path = req.flatMap { String(data: $0, encoding: .utf8) }?.split(separator: " ").dropFirst().first ?? "/"
+            let isVersion = path.hasPrefix("/version")
+            let body = Data((isVersion ? WebPage.version : WebPage.page).utf8)
+            var head = "HTTP/1.1 200 OK\r\nContent-Type: \(isVersion ? "text/plain" : "text/html"); charset=utf-8\r\nCache-Control: no-store\r\n"
             head += "Content-Length: \(body.count)\r\nConnection: close\r\n\r\n"
             c.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in c.cancel() })
         }
@@ -242,6 +244,10 @@ struct WebScreenQRView: View {
 }
 
 enum WebPage {
+    // The page carries its own version; when the Mac serves a newer one, an open page reloads itself
+    // (handy for the home-screen web app on iPhone, which otherwise keeps the old page in memory).
+    static let version = String(UInt32(truncatingIfNeeded: html.hashValueStable), radix: 36)
+    static var page: String { html.replacingOccurrences(of: "__VERSION__", with: version) }
     static let html = #"""
 <!doctype html>
 <html><head><meta charset="utf-8">
@@ -285,7 +291,9 @@ if(!key) say('Scan the QR code on your Mac','Open Encore Screen\'s menu on your 
 else if(!('VideoDecoder' in window)) say('This browser can\'t show the screen here','Use a recent Chrome or Safari. On this page, video decoding needs a secure connection.');
 msg.onclick=()=>{if(!key||!('VideoDecoder' in window))return;denied=false;document.documentElement.requestFullscreen?.().catch(()=>{});connect()};
 if(location.search.includes('auto')&&key&&('VideoDecoder' in window))connect();
+const VERSION='__VERSION__';
 function connect(){
+ fetch('/version',{cache:'no-store'}).then(r=>r.text()).then(v=>{if(v&&v!==VERSION)location.reload()}).catch(()=>{});
  msg.style.display='none';
  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.hostname+':7791');ws.binaryType='arraybuffer';
  ws.onopen=()=>{const d=window.devicePixelRatio||1;
@@ -341,4 +349,11 @@ function shape(p){const v=i=>((p[i]<<8)|p[i+1])/16;hot=[v(0),v(2)];ps=[v(4),v(6)
  if(ptr.src)URL.revokeObjectURL(ptr.src);ptr.src=URL.createObjectURL(new Blob([p.slice(8)],{type:'image/png'}))}
 </script></body></html>
 """#
+}
+
+extension String {
+    // FNV-1a: same value on every launch (Swift's hashValue is randomized per process).
+    var hashValueStable: UInt64 {
+        utf8.reduce(UInt64(0xcbf29ce484222325)) { ($0 ^ UInt64($1)) &* 0x100000001b3 }
+    }
 }
