@@ -224,6 +224,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     private var cursor: CursorStreamer?
     private(set) var streaming = false
     var onStateChange: (() -> Void)?
+    var onActivity: (() -> Void)?   // something moved on the extra screen (new frame or pointer move)
     var onEnd: ((String?) -> Void)?
     private var endReason: String?
 
@@ -290,6 +291,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                     self.stream = s
                     self.streaming = true
                     let cs = CursorStreamer(displayID: displayID, link: self.link)
+                    cs.onMove = { [weak self] in self?.onActivity?() }
                     cs.start()
                     self.cursor = cs
                     // Static screen: resend the last frame after a drop so the receiver never stays stuck on a broken picture.
@@ -320,6 +322,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
               let pb = CMSampleBufferGetImageBuffer(sb) else { return }
         lastFrame = pb
         lastFrameTime = Date()
+        onActivity?()
         encoder?.encode(pb, pts: CMSampleBufferGetPresentationTimeStamp(sb))
     }
 

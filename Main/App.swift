@@ -20,6 +20,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     private var session: Session?
     private var userStopped = false
     private var airDropGuard: Timer?
+    private var lastActivity = Date.distantPast
+    private var airDropPaused = false
     private var onboardingWindow: NSWindow?
     private let defaults = UserDefaults.standard
 
@@ -30,6 +32,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     var cutAirDrop: Bool {
         get { defaults.object(forKey: "cutAirDrop") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "cutAirDrop") }
+    }
+    // Smart mode: AirDrop is only paused while something moves on the extra screen, and comes back
+    // 2 seconds after it stops. Off: AirDrop stays paused for the whole session.
+    var smartAirDrop: Bool {
+        get { defaults.object(forKey: "smartAirDrop") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "smartAirDrop") }
     }
     var bitrate: Int { defaults.integer(forKey: "bitrate") > 0 ? defaults.integer(forKey: "bitrate") : 25_000_000 }
 
@@ -129,8 +137,15 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         userStopped = false
         lastError = nil
         lastReceiver = name
-        if cutAirDrop { AirDrop.set(enabled: false) }
+        if cutAirDrop && !smartAirDrop { pauseAirDrop() }
         let s = Session(name: name, endpoint: endpoint, bitrate: bitrate)
+        s.onActivity = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.lastActivity = Date()
+                if self.cutAirDrop && !self.airDropPaused { self.pauseAirDrop() }
+            }
+        }
         s.onStateChange = { [weak self] in
             self?.updateIcon()
             if s.streaming { self?.localNetworkOK = true; self?.localNetworkDenied = false }
@@ -143,7 +158,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             self.airDropGuard = nil
             if let reason { self.lastError = reason }
             if reason == Messages.localNetwork { self.localNetworkDenied = true }
-            if self.cutAirDrop { AirDrop.set(enabled: true) }
+            if self.cutAirDrop { self.resumeAirDrop() }
             self.updateIcon()
             // Unexpected drop (sleep, Wi-Fi): retry while the receiver is still advertised.
             // Also keep retrying while macOS blocks Local Network: it works as soon as the user allows it.
@@ -154,13 +169,29 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         session = s
         activeName = name
         s.start()
-        // macOS turns AirDrop back on by itself from time to time: keep it paused for the whole session.
+        // Keeps AirDrop in the right state: paused while the screen moves (or for the whole session if smart mode
+        // is off), back on after 2 s of stillness. Also re-pauses it if macOS turns it back on by itself.
         airDropGuard?.invalidate()
-        airDropGuard = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self, self.session != nil, self.cutAirDrop, AirDrop.helperInstalled, AirDrop.isActive else { return }
-            DispatchQueue.global().async { AirDrop.set(enabled: false) }
+        airDropGuard = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self, self.session != nil, self.cutAirDrop, AirDrop.helperInstalled else { return }
+            let moving = Date().timeIntervalSince(self.lastActivity) < 2
+            if !self.smartAirDrop || moving {
+                if AirDrop.isActive { self.pauseAirDrop() }
+            } else if self.airDropPaused {
+                self.resumeAirDrop()
+            }
         }
         updateIcon()
+    }
+
+    private func pauseAirDrop() {
+        airDropPaused = true
+        DispatchQueue.global(qos: .userInteractive).async { AirDrop.set(enabled: false) }
+    }
+
+    private func resumeAirDrop() {
+        airDropPaused = false
+        DispatchQueue.global(qos: .utility).async { AirDrop.set(enabled: true) }
     }
 
     func disconnect() {
@@ -224,6 +255,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         air.target = self
         air.state = cutAirDrop ? .on : .off
         menu.addItem(air)
+        let smart = NSMenuItem(title: "Keep AirDrop On While the Screen Is Still", action: #selector(toggleSmartAirDrop), keyEquivalent: "")
+        smart.target = self
+        smart.state = smartAirDrop ? .on : .off
+        smart.isEnabled = cutAirDrop
+        smart.indentationLevel = 1
+        menu.addItem(smart)
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.enabled ? .on : .off
@@ -255,6 +292,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         if session != nil { disconnect(); return }
         if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil { connect(name) }
     }
+
+    @objc private func toggleSmartAirDrop() { smartAirDrop.toggle() }
 
     @objc private func toggleAirDrop() {
         cutAirDrop.toggle()
@@ -343,7 +382,7 @@ struct OnboardingView: View {
                                        : "Found \(receivers.joined(separator: ", ")). You're all set.",
                      done: !receivers.isEmpty, button: nil, searching: receivers.isEmpty && !controller.localNetworkDenied) {}
                 step(4, "Make it smooth",
-                     "Pauses AirDrop while you use the extra screen, so Wi-Fi stays steady. Asks for your password once.",
+                     "Pauses AirDrop only while things move on the extra screen, so Wi-Fi stays steady. Asks for your password once.",
                      done: airDropOK, button: "Enable") { AirDrop.installHelper(); airDropOK = AirDrop.helperInstalled }
                 Toggle("Open Encore Screen at login", isOn: $login)
                     .toggleStyle(.checkbox)

@@ -16,6 +16,7 @@ final class CursorStreamer {
     private var last: (UInt16, UInt16, Bool)?
     private var ticks = 0
     private var shapeHash = 0
+    var onMove: (() -> Void)?
 
     init(displayID: CGDirectDisplayID, link: Link) {
         self.displayID = displayID
@@ -51,6 +52,7 @@ final class CursorStreamer {
         let x = norm((loc.x - b.minX) / b.width), y = norm((loc.y - b.minY) / b.height)
         // Unchanged position: still resend 4 times a second, so a lost datagram never leaves the pointer stale.
         if let l = last, l.0 == x, l.1 == y, l.2 == visible, ticks % 30 != 0 { return }
+        if visible, let l = last, l.0 != x || l.1 != y { onMove?() }
         last = (x, y, visible)
         seq &+= 1
         let pkt: [UInt8] = [6, UInt8(seq >> 8), UInt8(seq & 0xFF), UInt8(x >> 8), UInt8(x & 0xFF),
