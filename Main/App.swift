@@ -9,6 +9,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @Published var activeName: String?
     @Published var lastError: String?
     @Published var localNetworkDenied = false
+    @Published var localNetworkOK = false
+    private var probe: NWConnection?
+    private var probeTimer: Timer?
     @Published var browsing = false
     var onSwitchMode: (() -> Void)?
 
@@ -57,7 +60,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.receivers = found
-                if !found.isEmpty { self.localNetworkDenied = false }
+                self.probeLocalNetwork()
                 self.autoConnect()
             }
         }
@@ -75,6 +78,35 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         }
         b.start(queue: .main)
         browser = b
+    }
+
+    // Seeing a screen over Bonjour doesn't prove we may connect to it: macOS can still block the
+    // connection (Local Network). Open a UDP flow to the screen (nothing is sent, so the screen doesn't react)
+    // and look at the path: ready means allowed, "localNetworkDenied" means blocked. Retry until allowed.
+    private func probeLocalNetwork() {
+        guard !localNetworkOK, probe == nil, let endpoint = receivers.values.first else { return }
+        let c = NWConnection(to: endpoint, using: .udp)
+        probe = c
+        c.stateUpdateHandler = { [weak self] st in
+            DispatchQueue.main.async {
+                guard let self, self.probe === c else { return }
+                switch st {
+                case .ready:
+                    self.localNetworkOK = true
+                    self.localNetworkDenied = false
+                    c.cancel(); self.probe = nil
+                    self.probeTimer?.invalidate(); self.probeTimer = nil
+                case .waiting, .failed:
+                    if c.currentPath?.unsatisfiedReason == .localNetworkDenied { self.localNetworkDenied = true }
+                    c.cancel(); self.probe = nil
+                default: break
+                }
+            }
+        }
+        c.start(queue: .main)
+        if probeTimer == nil {
+            probeTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.probeLocalNetwork() }
+        }
     }
 
     private func autoConnect() {
@@ -99,7 +131,10 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         lastReceiver = name
         if cutAirDrop { AirDrop.set(enabled: false) }
         let s = Session(name: name, endpoint: endpoint, bitrate: bitrate)
-        s.onStateChange = { [weak self] in self?.updateIcon() }
+        s.onStateChange = { [weak self] in
+            self?.updateIcon()
+            if s.streaming { self?.localNetworkOK = true; self?.localNetworkDenied = false }
+        }
         s.onEnd = { [weak self, weak s] reason in
             guard let self, let s, self.session === s else { return }
             self.session = nil
@@ -298,9 +333,11 @@ struct OnboardingView: View {
                 }
                 step(2, "Let it find your other Mac",
                      controller.localNetworkDenied
-                        ? "macOS is blocking the local network. Turn on SpareScreen in Local Network settings."
-                        : "macOS may ask to find devices on your network. Click Allow.",
-                     done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil) { LocalNetwork.openSettings() }
+                        ? "macOS is blocking the connection. Turn on SpareScreen in Local Network settings."
+                        : controller.receivers.isEmpty ? "macOS may ask to find devices on your network. Click Allow."
+                                                       : "Checking that macOS lets SpareScreen connect…",
+                     done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil,
+                     searching: !networkOK && !controller.localNetworkDenied && !controller.receivers.isEmpty) { LocalNetwork.openSettings() }
                 step(3, "Set up your extra screen",
                      receivers.isEmpty ? "On the other Mac, open SpareScreen and choose \u{201C}Make this an extra screen\u{201D}. Same Wi-Fi."
                                        : "Found \(receivers.joined(separator: ", ")). You're all set.",
@@ -336,7 +373,7 @@ struct OnboardingView: View {
         .onReceive(timer) { _ in screenOK = ScreenPermission.granted }
     }
 
-    private var networkOK: Bool { !controller.receivers.isEmpty || (controller.browsing && !controller.localNetworkDenied) }
+    private var networkOK: Bool { controller.localNetworkOK }
 
     private var header: some View {
         ZStack {
