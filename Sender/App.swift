@@ -30,6 +30,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         updateIcon()
+        statusItem.autosaveName = "SpareScreenStatusItem"
+        Hotkey.register { [weak self] in self?.toggleStreaming() }
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
     }
@@ -110,6 +112,21 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         menu.addItem(disabled(status))
         if let err = lastError { menu.addItem(disabled("⚠︎ " + err)) }
 
+        // The one-click action: unplug or plug back the extra screen.
+        if session != nil {
+            let stop = NSMenuItem(title: "Stop Streaming", action: #selector(toggleStreaming), keyEquivalent: "s")
+            stop.keyEquivalentModifierMask = [.control, .option, .command]
+            stop.target = self
+            stop.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: nil)
+            menu.addItem(stop)
+        } else if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil {
+            let start = NSMenuItem(title: "Start Streaming to \(name)", action: #selector(toggleStreaming), keyEquivalent: "s")
+            start.keyEquivalentModifierMask = [.control, .option, .command]
+            start.target = self
+            start.image = NSImage(systemSymbolName: "play.circle.fill", accessibilityDescription: nil)
+            menu.addItem(start)
+        }
+
         menu.addItem(.separator())
         menu.addItem(disabled("Available screens"))
         if receivers.isEmpty {
@@ -151,6 +168,11 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @objc private func toggleReceiver(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
         if activeName == name { disconnect() } else { connect(name) }
+    }
+
+    @objc func toggleStreaming() {
+        if session != nil { disconnect(); return }
+        if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil { connect(name) }
     }
 
     @objc private func toggleAirDrop() {
