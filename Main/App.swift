@@ -233,10 +233,11 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
         // Header: mascot, name, and a live status line with a colored dot.
         let status: String, color: NSColor
-        if let name = activeName, session?.streaming == true { status = "Live on \(name)"; color = .systemGreen }
+        let live = ([session].compactMap { $0 } + web.sessions).filter { $0.streaming }.map { $0.name }
+        if !live.isEmpty { status = "Live on " + live.joined(separator: ", "); color = .systemGreen }
         else if let name = activeName { status = "Connecting to \(name)…"; color = .systemOrange }
         else if let err = lastError { status = err; color = .systemRed }
-        else if receivers.isEmpty { status = "Looking for your other Mac…"; color = .systemGray }
+        else if receivers.isEmpty && web.sessions.isEmpty { status = "Looking for your other Mac…"; color = .systemGray }
         else { status = "Ready"; color = .systemGray }
         let header = NSMenuItem()
         header.view = MenuHeaderView(status: status, dot: color)
@@ -246,7 +247,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         }
 
         // The one-click action: unplug or plug back the extra screen.
-        if session != nil {
+        if session != nil || !web.sessions.isEmpty {
             let stop = item("Stop Extra Screen", #selector(toggleStreaming), key: "s", symbol: "stop.circle")
             stop.keyEquivalentModifierMask = [.control, .option, .command]
             menu.addItem(stop)
@@ -258,7 +259,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Screens"))
-        if receivers.isEmpty {
+        if receivers.isEmpty && web.sessions.isEmpty {
             let none = NSMenuItem(title: "Open Encore Screen on your other Mac", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
@@ -347,7 +348,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 
     @objc func toggleStreaming() {
-        if session != nil { disconnect(); return }
+        if session != nil || !web.sessions.isEmpty { disconnect(); web.stopAll(); return }
         if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil { connect(name) }
     }
 

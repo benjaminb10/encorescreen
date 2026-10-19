@@ -236,7 +236,7 @@ enum Messages {
 // One session = one connection to a receiver, with its own virtual display.
 @available(macOS 14.0, *)
 final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
-    let name: String
+    private(set) var name: String
     let link: ScreenLink
     let bitrate: Int
     private var screen: VirtualScreen?
@@ -291,6 +291,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func begin(_ hello: Hello) {
         let (width, height, sizeMM, scale) = (hello.width, hello.height, hello.sizeMM, hello.scale)
+        if link.sendsPointerInline { name = hello.deviceName }   // browsers introduce themselves ("iPhone (…)")
         // Retina receivers get a HiDPI virtual display (sharp text), capped at 4K to keep Wi-Fi happy.
         let hiDPI = scale >= 2
         let cap = hiDPI ? 3840 : 2560
