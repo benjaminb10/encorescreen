@@ -306,7 +306,7 @@ let lastMsg=0;
 setInterval(()=>{if(ws&&ws.readyState===1&&vw&&Date.now()-lastMsg>4000){lastMsg=Date.now();ws.close()}},1000);
 function connect(){
  lastMsg=Date.now();vw=0;
- fetch('/version',{cache:'no-store'}).then(r=>r.text()).then(v=>{if(v&&v!==VERSION)location.reload()}).catch(()=>{});
+ fetch('/version',{cache:'no-store'}).then(r=>r.text()).then(v=>{if(v&&v!==VERSION)location.replace(location.pathname+'?auto=1'+location.hash)}).catch(()=>{});
  msg.style.display='none';
  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.hostname+':7791');ws.binaryType='arraybuffer';
  ws.onopen=()=>{const d=window.devicePixelRatio||1;
