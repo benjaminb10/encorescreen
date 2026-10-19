@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   if (!(euros >= 1 && euros <= 500)) return res.status(400).json({ error: 'Amount must be between €1 and €500' })
 
   const form = new URLSearchParams({
-    ui_mode: 'embedded',
+    ui_mode: 'embedded_page',
     mode: 'payment',
     return_url: 'https://encorescreen.com/?thanks=1',
     'line_items[0][quantity]': '1',
