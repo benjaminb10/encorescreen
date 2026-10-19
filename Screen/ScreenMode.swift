@@ -267,7 +267,12 @@ final class ScreenController: NSObject {
         let awake = NSButton(checkboxWithTitle: "Keep this Mac awake, so it's always ready", target: self, action: #selector(toggleAwake(_:)))
         awake.state = KeepAwake.preferred ? .on : .off
         let info = label("This Mac: \(name)" + (localIPv4().map { " · \($0)" } ?? ""), size: 11, color: .tertiaryLabelColor)
-        let switchRole = linkButton("Use this Mac differently…", target: self, action: #selector(switchRole))
+        let switchButton = NSButton(title: "Use this Mac as the main Mac instead", target: self, action: #selector(switchRole))
+        switchButton.bezelStyle = .rounded
+        switchButton.controlSize = .small
+        let switchRole = NSStackView(views: [label("Is this the Mac you work on?", size: 12, color: .secondaryLabelColor), switchButton])
+        switchRole.spacing = 8
+        switchRole.isHidden = !AppMode.mainModeSupported   // an older Mac can only be an extra screen
 
         let body = NSStackView(views: [
             numberedRow(1, "Open Encore Screen on your main Mac", "Same app, same Wi-Fi. Choose \u{201C}This is my main Mac\u{201D}."),

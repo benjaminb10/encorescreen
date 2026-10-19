@@ -451,10 +451,11 @@ struct OnboardingView: View {
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
                 .padding(.top, 4)
-                HStack {
+                HStack(spacing: 6) {
                     Spacer()
-                    Button("Use this Mac differently…") { controller.switchRole() }
-                        .buttonStyle(.link).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Is this the Mac you want as the extra screen?").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Button("Switch to extra screen") { controller.switchRole() }
+                        .buttonStyle(.bordered).controlSize(.small)
                     Spacer()
                 }
             }
