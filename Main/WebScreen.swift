@@ -72,6 +72,7 @@ final class WebLink: ScreenLink {
                meta.opcode == .text,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                json["t"] != nil {
+                debug("ws input \(json["t"] ?? "")")
                 self.onInput?(json)
             } else if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .text,
@@ -195,6 +196,7 @@ final class WebScreenServer: ObservableObject {
         c.start(queue: q)
         c.receive(minimumIncompleteLength: 1, maximumLength: 64 << 10) { req, _, _, _ in
             let path = req.flatMap { String(data: $0, encoding: .utf8) }?.split(separator: " ").dropFirst().first ?? "/"
+            debug("http \(path) from \(c.endpoint)")
             let isVersion = path.hasPrefix("/version")
             let body = Data((isVersion ? WebPage.version : WebPage.page).utf8)
             var head = "HTTP/1.1 200 OK\r\nContent-Type: \(isVersion ? "text/plain" : "text/html"); charset=utf-8\r\nCache-Control: no-store\r\n"
@@ -266,9 +268,14 @@ canvas{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;cursor:n
  color:#fff;font:600 20px -apple-system,system-ui,sans-serif;text-align:center;padding:24px;
  background:linear-gradient(135deg,#FFB347,#FF6B6B);cursor:pointer}
 #msg small{font-weight:400;font-size:14px;opacity:.9}
+#kb{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));width:56px;height:56px;
+ border-radius:28px;border:0;background:linear-gradient(135deg,#FFB347,#FF6B6B);color:#fff;font-size:26px;display:none;
+ box-shadow:0 6px 18px rgba(0,0,0,.35);z-index:5}
+#ti{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0}
 #tip{font-weight:400;font-size:13px;opacity:.85;max-width:320px;margin-top:8px}
 </style></head>
-<body><canvas id="v"></canvas><img id="p"><div id="msg"></div>
+<body><canvas id="v"></canvas><img id="p"><button id="kb" aria-label="Keyboard">⌨︎</button>
+<input id="ti" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><div id="msg"></div>
 <script>
 const msg=document.getElementById('msg'),cv=document.getElementById('v'),ctx=cv.getContext('2d'),ptr=document.getElementById('p');
 let sent=null,resizeTimer;
@@ -303,7 +310,8 @@ function connect(){
  ws.onclose=()=>{cfg='';needKey=true;if(denied){say('Not allowed','This link is out of date, or the device was refused on the Mac. Scan the QR code again.');return}
   say('Waiting for your Mac…','Reconnecting');setTimeout(connect,2000)};
  ws.onmessage=e=>{const b=new Uint8Array(e.data),t=b[0],p=b.subarray(1);
-  if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close();else if(t===8){denied=true;ws.close()}};
+  if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close();else if(t===8){denied=true;ws.close()}
+  else if(t===9){try{const f=JSON.parse(new TextDecoder().decode(p));kb.style.display=f.on?'block':'none';if(!f.on)ti.blur()}catch(_){}}};
 }
 function configure(p){
  const sl=(p[0]<<8)|p[1],sps=p.subarray(2,2+sl),o=2+sl,pl=(p[o]<<8)|p[o+1],pps=p.subarray(o+2,o+2+pl);
@@ -345,6 +353,16 @@ cv.addEventListener('touchend',e=>{e.preventDefault();clearTimeout(longTimer);
  if(e.touches.length===0)pinch=null;if(!touch||touch.moved||touch.long){touch=null;return}
  const p=pos({clientX:touch.x0,clientY:touch.y0}),now=Date.now();
  if(now-lastTap<300){sendInput({t:'double',x:p.x,y:p.y});lastTap=0}else{sendInput({t:'tap',x:p.x,y:p.y});lastTap=now}touch=null},{passive:false});
+// Keyboard: the Mac reports a focused text field, the page shows ⌨︎; tapping it opens the phone's keyboard
+// (iOS only allows that from a tap). Whatever is typed goes to the Mac.
+const kb=document.getElementById('kb'),ti=document.getElementById('ti');
+kb.addEventListener('touchend',e=>{e.preventDefault();e.stopPropagation();ti.value='';ti.focus()},{passive:false});
+kb.addEventListener('click',()=>{ti.value='';ti.focus()});
+// Text goes through beforeinput; Enter, Backspace and arrows through keydown (fires even when the field is empty).
+ti.addEventListener('beforeinput',e=>{e.preventDefault();
+ if(e.inputType==='insertText'||e.inputType==='insertReplacementText'||e.inputType==='insertFromPaste')sendInput({t:'text',s:e.data||''})});
+ti.addEventListener('keydown',e=>{if(['Enter','Backspace','Tab','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+ e.preventDefault();sendInput({t:'key',k:e.key})}});
 function shape(p){const v=i=>((p[i]<<8)|p[i+1])/16;hot=[v(0),v(2)];ps=[v(4),v(6)];
  if(ptr.src)URL.revokeObjectURL(ptr.src);ptr.src=URL.createObjectURL(new Blob([p.slice(8)],{type:'image/png'}))}
 </script></body></html>

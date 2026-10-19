@@ -253,6 +253,8 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastFrameTime = Date()
     private var keepAlive: Timer?
     private var cursor: CursorStreamer?
+    private var focusTimer: Timer?
+    private var lastFocus: CGRect?? = .none
     private(set) var streaming = false
     var onStateChange: (() -> Void)?
     var onActivity: (() -> Void)?   // something moved on the extra screen (new frame or pointer move)
@@ -357,6 +359,18 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                 await MainActor.run {
                     self.stream = s
                     self.streaming = true
+                    // Browser screens: tell the page when a text field is focused there, so it can offer its keyboard.
+                    if self.link.sendsPointerInline {
+                        self.focusTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+                            guard let self, TouchInput.enabled else { return }
+                            let f = focusedTextField(on: displayID)
+                            if case .some(let prev) = self.lastFocus, prev == f { return }
+                            self.lastFocus = .some(f)
+                            var json: [String: Any] = ["on": f != nil]
+                            if let f { json["x"] = f.minX; json["y"] = f.minY; json["w"] = f.width; json["h"] = f.height }
+                            if let d = try? JSONSerialization.data(withJSONObject: json) { _ = self.link.send(type: Proto.textFocus, payload: d) }
+                        }
+                    }
                     let cs = CursorStreamer(displayID: displayID, link: self.link)
                     cs.onMove = { [weak self] in self?.onActivity?() }
                     cs.start()
@@ -408,6 +422,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func teardown() {
         keepAlive?.invalidate(); keepAlive = nil
+        focusTimer?.invalidate(); focusTimer = nil
         cursor?.stop(); cursor = nil
         stream?.stopCapture { _ in }
         stream = nil

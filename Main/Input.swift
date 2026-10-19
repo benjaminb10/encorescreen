@@ -26,6 +26,7 @@ enum TouchInput {
     // x, y: 0…1 on the extra screen. Messages come from the page as JSON: {"t": "tap" | "double" | "right" |
     // "scroll" | "zoom", "x", "y", "dx", "dy", "dir"}.
     static func handle(_ m: [String: Any], displayID: CGDirectDisplayID) {
+        debug("input \(m["t"] ?? "?") enabled=\(enabled) trusted=\(AXIsProcessTrusted())")
         guard enabled, allowed() else { return }
         let b = CGDisplayBounds(displayID)
         let x = (m["x"] as? Double ?? 0.5), y = (m["y"] as? Double ?? 0.5)
@@ -42,6 +43,20 @@ enum TouchInput {
                 e?.location = point
                 e?.post(tap: .cghidEventTap)
             }
+        case "text":
+            // Characters typed on the phone's keyboard, sent as text (accents and emoji included).
+            guard let str = m["s"] as? String, !str.isEmpty else { return }
+            let utf16 = Array(str.utf16)
+            for down in [true, false] {
+                let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down)
+                e?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+                e?.post(tap: .cghidEventTap)
+            }
+        case "key":
+            let codes: [String: CGKeyCode] = ["Backspace": 51, "Enter": 36, "Tab": 48, "Escape": 53,
+                                              "ArrowLeft": 123, "ArrowRight": 124, "ArrowDown": 125, "ArrowUp": 126]
+            guard let k = m["k"] as? String, let code = codes[k] else { return }
+            for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)?.post(tap: .cghidEventTap) }
         case "zoom":
             // Pinch: the standard zoom shortcut of the app under the finger (⌘+ / ⌘-).
             withPointer(at: point, restore: true) {
@@ -87,4 +102,39 @@ enum TouchInput {
         // Scrolls keep the pointer in place for a moment so momentum keeps going to the same window.
         DispatchQueue.main.asyncAfter(deadline: .now() + (restore ? 0.05 : 0.6), execute: work)
     }
+}
+
+// Where the focused text field is, if it is on the given extra screen (0…1 coordinates), so the page can offer
+// its keyboard. Needs the Accessibility permission; returns nil otherwise.
+func focusedTextField(on displayID: CGDirectDisplayID) -> CGRect? {
+    guard AXIsProcessTrusted() else { return nil }
+    let system = AXUIElementCreateSystemWide()
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+          let el = focused, CFGetTypeID(el) == AXUIElementGetTypeID() else { return nil }
+    let element = el as! AXUIElement
+    var roleRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+    let role = roleRef as? String ?? ""
+    var editable: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &editable)
+    let textRoles = ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"]
+    guard textRoles.contains(role) || (editable as? Bool) == true else { return nil }
+    var posRef: CFTypeRef?, sizeRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef)
+    AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
+    var pos = CGPoint.zero, size = CGSize.zero
+    if let posRef { AXValueGetValue(posRef as! AXValue, .cgPoint, &pos) }
+    if let sizeRef { AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) }
+    let b = CGDisplayBounds(displayID)
+    let center = CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
+    guard b.contains(center) else { return nil }
+    return CGRect(x: (pos.x - b.minX) / b.width, y: (pos.y - b.minY) / b.height, width: size.width / b.width, height: size.height / b.height)
+}
+
+// Temporary diagnostics (written to /tmp/encorescreen-debug.log).
+func debug(_ s: String) {
+    let line = "\(Date()) \(s)\n"
+    if let h = FileHandle(forWritingAtPath: "/tmp/encorescreen-debug.log") { h.seekToEndOfFile(); h.write(Data(line.utf8)); h.closeFile() }
+    else { try? line.write(toFile: "/tmp/encorescreen-debug.log", atomically: true, encoding: .utf8) }
 }
