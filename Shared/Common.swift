@@ -12,6 +12,7 @@ enum Proto {
     static let hello: UInt8 = 3        // screen → main: [u16 w px][u16 h px][u16 w mm][u16 h mm][u8 scale]
     static let bye: UInt8 = 4          // main → screen: streaming stopped on purpose
     static let ping: UInt8 = 5         // main → screen: heartbeat, every second
+    static let cursorPos: UInt8 = 6    // main → browser screen only: pointer position (native screens get it over UDP)
     static let cursorShape: UInt8 = 7  // main → screen: pointer image (position goes over UDP, see Cursor.swift)
 }
 

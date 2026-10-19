@@ -35,9 +35,24 @@ final class VirtualScreen {
     }
 }
 
+// What a session needs from its connection to a screen: the native TCP link below, or a browser (WebScreen.swift).
+@available(macOS 14.0, *)
+protocol ScreenLink: AnyObject {
+    var onHello: ((Int, Int, CGSize, Int) -> Void)? { get set }
+    var onClose: (() -> Void)? { get set }
+    var localNetworkDenied: Bool { get }
+    var remoteHost: NWEndpoint.Host? { get }
+    var sendsPointerInline: Bool { get }   // true: pointer positions go through send(), not the UDP side channel
+    func start()
+    func stop()
+    func sayGoodbye()
+    func send(type: UInt8, payload: Data) -> Bool
+}
+
 // Wire format: [u32 BE length][u8 type][payload].
 @available(macOS 14.0, *)
-final class Link {
+final class Link: ScreenLink {
+    let sendsPointerInline = false
     let conn: NWConnection
     private let q = DispatchQueue(label: "encorescreen.link", qos: .userInteractive)
     private var inflight = 0
@@ -137,7 +152,7 @@ final class Link {
 @available(macOS 14.0, *)
 final class Encoder {
     private var session: VTCompressionSession?
-    private let link: Link
+    private let link: ScreenLink
     private let lock = NSLock()
     private var _forceKey = true
     var forceKey: Bool {
@@ -145,7 +160,7 @@ final class Encoder {
         set { lock.lock(); _forceKey = newValue; lock.unlock() }
     }
 
-    init?(width: Int, height: Int, bitrate: Int, link: Link) {
+    init?(width: Int, height: Int, bitrate: Int, link: ScreenLink) {
         self.link = link
         let spec: [CFString: Any] = [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true]
         let st = VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height),
@@ -213,7 +228,7 @@ enum Messages {
 @available(macOS 14.0, *)
 final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     let name: String
-    let link: Link
+    let link: ScreenLink
     let bitrate: Int
     private var screen: VirtualScreen?
     private var stream: SCStream?
@@ -228,10 +243,14 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     var onEnd: ((String?) -> Void)?
     private var endReason: String?
 
-    init(name: String, endpoint: NWEndpoint, bitrate: Int) {
+    init(name: String, link: ScreenLink, bitrate: Int) {
         self.name = name
-        self.link = Link(endpoint: endpoint)
+        self.link = link
         self.bitrate = bitrate
+    }
+
+    convenience init(name: String, endpoint: NWEndpoint, bitrate: Int) {
+        self.init(name: name, link: Link(endpoint: endpoint), bitrate: bitrate)
     }
 
     func start() {

@@ -21,6 +21,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     private var session: Session?
     private var userStopped = false
     private var airDropGuard: Timer?
+    let web = WebScreenServer()
+    private var qrWindow: NSWindow?
     private var lastActivity = Date.distantPast
     private var airDropPaused = false
     private var onboardingWindow: NSWindow?
@@ -49,6 +51,10 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         updateIcon()
         statusItem.autosaveName = "EncoreScreenStatusItem"
         Hotkey.register { [weak self] in self?.toggleStreaming() }
+        web.bitrate = bitrate
+        web.onActivity = { [weak self] in self?.noteActivity() }
+        web.onChange = { [weak self] in self?.updateIcon(); self?.armAirDropGuard() }
+        web.start()
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
         if !defaults.bool(forKey: "mainConfigured") {
@@ -140,13 +146,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         lastReceiver = name
         if cutAirDrop && !smartAirDrop { pauseAirDrop() }
         let s = Session(name: name, endpoint: endpoint, bitrate: bitrate)
-        s.onActivity = { [weak self] in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.lastActivity = Date()
-                if self.cutAirDrop && !self.airDropPaused { self.pauseAirDrop() }
-            }
-        }
+        s.onActivity = { [weak self] in self?.noteActivity() }
         s.onStateChange = { [weak self] in
             self?.updateIcon()
             if s.streaming { self?.localNetworkOK = true; self?.localNetworkDenied = false }
@@ -157,9 +157,10 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             self.activeName = nil
             self.airDropGuard?.invalidate()
             self.airDropGuard = nil
+            self.armAirDropGuard()
             if let reason { self.lastError = reason }
             if reason == Messages.localNetwork { self.localNetworkDenied = true }
-            if self.cutAirDrop { self.resumeAirDrop() }
+            if self.cutAirDrop && !self.anyScreenOn { self.resumeAirDrop() }
             self.updateIcon()
             // Unexpected drop (sleep, Wi-Fi): retry while the receiver is still advertised.
             // Also keep retrying while macOS blocks Local Network: it works as soon as the user allows it.
@@ -170,11 +171,30 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         session = s
         activeName = name
         s.start()
-        // Keeps AirDrop in the right state: paused while the screen moves (or for the whole session if smart mode
-        // is off), back on after 2 s of stillness. Also re-pauses it if macOS turns it back on by itself.
-        airDropGuard?.invalidate()
+        armAirDropGuard()
+        updateIcon()
+    }
+
+    private var anyScreenOn: Bool { session != nil || !web.sessions.isEmpty }
+
+    private func noteActivity() {
+        DispatchQueue.main.async {
+            self.lastActivity = Date()
+            if self.cutAirDrop && !self.airDropPaused { self.pauseAirDrop() }
+        }
+    }
+
+    // Keeps AirDrop in the right state: paused while the screen moves (or for the whole session if smart mode
+    // is off), back on after 2 s of stillness. Also re-pauses it if macOS turns it back on by itself.
+    private func armAirDropGuard() {
+        guard anyScreenOn else {
+            airDropGuard?.invalidate(); airDropGuard = nil
+            if airDropPaused { resumeAirDrop() }
+            return
+        }
+        guard airDropGuard == nil else { return }
         airDropGuard = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self, self.session != nil, self.cutAirDrop, AirDrop.helperInstalled else { return }
+            guard let self, self.anyScreenOn, self.cutAirDrop, AirDrop.helperInstalled else { return }
             let moving = Date().timeIntervalSince(self.lastActivity) < 2
             if !self.smartAirDrop || moving {
                 if AirDrop.isActive { self.pauseAirDrop() }
@@ -182,7 +202,6 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
                 self.resumeAirDrop()
             }
         }
-        updateIcon()
     }
 
     private func pauseAirDrop() {
@@ -202,7 +221,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     private func updateIcon() {
         streaming = session?.streaming == true
-        statusItem.button?.image = Brand.menuBarIcon(active: streaming)
+        statusItem.button?.image = Brand.menuBarIcon(active: streaming || web.sessions.contains { $0.streaming })
     }
 
     // MARK: Menu
@@ -249,6 +268,15 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             menu.addItem(screen)
         }
 
+        for w in web.sessions {
+            let b = item(w.name, #selector(stopWebScreen(_:)), symbol: "globe")
+            b.representedObject = w
+            b.state = .on
+            b.toolTip = "Click to disconnect"
+            menu.addItem(b)
+        }
+        menu.addItem(item("Add Any Device with a Browser…", #selector(showQR), symbol: "qrcode"))
+
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
@@ -269,6 +297,20 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         settings.submenu = sub
         menu.addItem(settings)
         menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))
+    }
+
+    @objc private func stopWebScreen(_ sender: NSMenuItem) { (sender.representedObject as? Session)?.stop() }
+
+    @objc private func showQR() {
+        let w = qrWindow ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 460), styleMask: [.titled, .closable],
+                                    backing: .buffered, defer: false)
+        w.title = "Encore Screen"
+        w.isReleasedWhenClosed = false
+        w.contentView = NSHostingView(rootView: WebScreenQRView(url: web.url))
+        qrWindow = w
+        w.center()
+        NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
     }
 
     // 0 = pause only while moving, 1 = always pause, 2 = never pause.
@@ -324,6 +366,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     @objc private func quit() {
         session?.stop()
+        web.stopAll()
         if cutAirDrop { AirDrop.set(enabled: true) }
         NSApp.terminate(nil)
     }
