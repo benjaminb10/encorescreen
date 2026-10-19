@@ -24,7 +24,9 @@ final class CursorStreamer {
 
     func start() {
         guard let host = link.remoteHost else { log("cursor: unknown receiver address"); return }
-        let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: .udp)
+        let params = NWParameters.udp
+        params.serviceClass = .interactiveVoice   // highest Wi-Fi priority (WMM voice queue): tiny, time-critical packets
+        let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: params)
         c.start(queue: q)
         udp = c
         let t = DispatchSource.makeTimerSource(queue: q)

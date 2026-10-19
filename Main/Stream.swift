@@ -49,7 +49,9 @@ final class Link {
     init(endpoint: NWEndpoint) {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
-        conn = NWConnection(to: endpoint, using: NWParameters(tls: nil, tcp: tcp))
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.serviceClass = .interactiveVideo   // Wi-Fi priority (WMM video queue), ahead of bulk traffic
+        conn = NWConnection(to: endpoint, using: params)
     }
 
     func start() {
