@@ -78,7 +78,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 
     private func autoConnect() {
-        guard session == nil, !userStopped, defaults.bool(forKey: "onboarded") || lastReceiver != nil,
+        // Never start capturing before Screen Recording is granted: each attempt would pop the system prompt again.
+        guard ScreenPermission.granted, session == nil, !userStopped, defaults.bool(forKey: "onboarded") || lastReceiver != nil,
               let name = lastReceiver, receivers[name] != nil else { return }
         connect(name)
     }
@@ -87,6 +88,11 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     func connect(_ name: String) {
         guard let endpoint = receivers[name] else { return }
+        guard ScreenPermission.granted else {
+            lastError = "Allow Screen Recording first (Setup Assistant, step 1)."
+            showOnboarding()
+            return
+        }
         session?.stop()
         userStopped = false
         lastError = nil
