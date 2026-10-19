@@ -1,17 +1,20 @@
-<p align="center"><img src="Icons/EncoreScreen-1024.png" width="160" alt="Encore Screen mascot"></p>
-
-<h1 align="center">Encore Screen</h1>
-
-<p align="center"><b>Give your old Mac, iPhone or Android an encore: it becomes a wireless extra screen for your Mac.</b><br>
-Free and open source.</p>
+<p align="center"><img src="docs/media/banner.png" alt="Encore Screen: turn an old Mac, an iPhone or an Android into a wireless extra screen for your Mac"></p>
 
 <p align="center">
-  <a href="https://encorescreen.com/EncoreScreen.dmg"><b>Download for Mac</b></a> ·
-  <a href="https://encorescreen.com">Website</a> ·
-  <a href="https://encorescreen.com/support">Support the project ☕</a>
+  <a href="https://encorescreen.com/EncoreScreen.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-1E1B3A?style=for-the-badge&logo=apple&logoColor=white" alt="Download for Mac"></a>
+  <a href="https://encorescreen.com/support"><img src="https://img.shields.io/badge/Support_the_project_☕-FF6B6B?style=for-the-badge" alt="Support the project"></a>
+  <a href="https://encorescreen.com"><img src="https://img.shields.io/badge/encorescreen.com-FFB347?style=for-the-badge" alt="Website"></a>
 </p>
 
-Encore Screen gives an old Mac (an iMac from 2012, a forgotten MacBook…) a second life as a wireless extended display for your main Mac.
+<p align="center"><b>Give your old Mac, iPhone or Android an encore: it becomes a wireless extra screen for your Mac.</b><br>
+Free and open source. Signed and notarized by Apple.</p>
+
+<p align="center">
+  <a href="docs/media/encore-screen-launch.mp4"><img src="docs/media/preview.gif" width="720" alt="Encore Screen in 30 seconds"></a><br>
+  <sub>▶️ <a href="docs/media/encore-screen-launch.mp4">Watch the 30 second video (with sound)</a></sub>
+</p>
+
+> **Like it?** Encore Screen is free. If it gave your old Mac a second life, [buy me a coffee ☕](https://encorescreen.com/support). You choose the amount.
 
 ## How it works
 
