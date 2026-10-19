@@ -14,6 +14,7 @@ final class WebLink: ScreenLink {
     var onHello: ((Hello) -> Void)?
     var onClose: (() -> Void)?
     var onInput: (([String: Any]) -> Void)?
+    var onProbeAck: ((UInt32, Double) -> Void)?
     private let q = DispatchQueue(label: "encorescreen.web", qos: .userInteractive)
     private var inflight = 0
     private var closed = false
@@ -68,11 +69,16 @@ final class WebLink: ScreenLink {
     private func receive() {
         conn.receiveMessage { [weak self] data, ctx, _, err in
             guard let self, err == nil else { self?.conn.cancel(); return }
-            if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+            if let data, data.count >= 7, data.first == Proto.probeAck,
+               let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+               meta.opcode == .binary {
+                let b = [UInt8](data)
+                let id = UInt32(b[1]) << 24 | UInt32(b[2]) << 16 | UInt32(b[3]) << 8 | UInt32(b[4])
+                self.onProbeAck?(id, Double(UInt16(b[5]) << 8 | UInt16(b[6])) / 10)
+            } else if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .text,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                json["t"] != nil {
-                debug("ws input \(json["t"] ?? "")")
                 self.onInput?(json)
             } else if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .text,
@@ -196,7 +202,6 @@ final class WebScreenServer: ObservableObject {
         c.start(queue: q)
         c.receive(minimumIncompleteLength: 1, maximumLength: 64 << 10) { req, _, _, _ in
             let path = req.flatMap { String(data: $0, encoding: .utf8) }?.split(separator: " ").dropFirst().first ?? "/"
-            debug("http \(path) from \(c.endpoint)")
             let isVersion = path.hasPrefix("/version")
             let body = Data((isVersion ? WebPage.version : WebPage.page).utf8)
             var head = "HTTP/1.1 200 OK\r\nContent-Type: \(isVersion ? "text/plain" : "text/html"); charset=utf-8\r\nCache-Control: no-store\r\n"
@@ -317,6 +322,7 @@ function connect(){
   say('Waiting for your Mac…','Reconnecting');setTimeout(connect,2000)};
  ws.onmessage=e=>{lastMsg=Date.now();const b=new Uint8Array(e.data),t=b[0],p=b.subarray(1);
   if(t===1)configure(p);else if(t===2)frame(p);else if(t===6)move(p);else if(t===7)shape(p);else if(t===4)ws.close();else if(t===8){denied=true;ws.close()}
+  else if(t===11){const a=new Uint8Array(7);a[0]=10;a.set(p.subarray(0,4),1);const d=Math.min(65535,Math.round(decAvg*10));a[5]=d>>8;a[6]=d&255;ws.send(a)}
   else if(t===9){try{const f=JSON.parse(new TextDecoder().decode(p));kb.style.display=f.on?'block':'none';if(!f.on)ti.blur()}catch(_){}}};
 }
 function configure(p){
@@ -329,9 +335,12 @@ function configure(p){
  dec.configure({codec,description:a,optimizeForLatency:true,hardwareAcceleration:'prefer-hardware'});needKey=true;
 }
 function isKey(p){let i=0;while(i+4<p.length){const n=((p[i]<<24)|(p[i+1]<<16)|(p[i+2]<<8)|p[i+3])>>>0;if((p[i+4]&31)===5)return true;i+=4+n}return false}
+// Decode time (chunk handed to the decoder → decoded frame), averaged, reported with each latency probe.
+const sentAt=new Map();let decAvg=0;
 function frame(p){if(!dec||dec.state!=='configured')return;const k=isKey(p);if(needKey&&!k)return;needKey=false;
- dec.decode(new EncodedVideoChunk({type:k?'key':'delta',timestamp:(ts+=16667),data:p}))}
-function draw(f){msg.style.display='none';if(cv.width!==f.displayWidth||cv.height!==f.displayHeight){cv.width=vw=f.displayWidth;cv.height=vh=f.displayHeight}
+ ts+=16667;sentAt.set(ts,performance.now());if(sentAt.size>120)sentAt.delete(sentAt.keys().next().value);
+ dec.decode(new EncodedVideoChunk({type:k?'key':'delta',timestamp:ts,data:p}))}
+function draw(f){msg.style.display='none';const st=sentAt.get(f.timestamp);if(st!==undefined){decAvg=decAvg?decAvg*0.9+(performance.now()-st)*0.1:performance.now()-st;sentAt.delete(f.timestamp)}if(cv.width!==f.displayWidth||cv.height!==f.displayHeight){cv.width=vw=f.displayWidth;cv.height=vh=f.displayHeight}
  ctx.drawImage(f,0,0);f.close()}
 function move(p){if(!vw)return;const x=((p[2]<<8)|p[3])/65535,y=((p[4]<<8)|p[5])/65535,vis=p[6]===1;
  const W=innerWidth,H=innerHeight,k=Math.min(W/vw,H/vh),rx=(W-vw*k)/2,ry=(H-vh*k)/2;

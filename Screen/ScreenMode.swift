@@ -139,6 +139,10 @@ final class Receiver {
                 let p = Data(body)
                 self.lastReceived = Date()
                 if p[0] == 4 { c.cancel(); return }   // sender stopped streaming
+                if p[0] == Proto.probe, p.count >= 5 {   // latency probe: echo right away
+                    let msg = Data([0, 0, 0, 5, Proto.probeAck]) + p.subdata(in: 1..<5)
+                    c.send(content: msg, completion: .idempotent)
+                }
                 self.handle(type: p[0], payload: p.subdata(in: 1..<p.count))
                 self.readHeader(c)
             }

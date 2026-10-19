@@ -46,6 +46,7 @@ protocol ScreenLink: AnyObject {
     var onHello: ((Hello) -> Void)? { get set }
     var onClose: (() -> Void)? { get set }
     var onInput: (([String: Any]) -> Void)? { get set }   // touch gestures (browser screens only)
+    var onProbeAck: ((UInt32, Double) -> Void)? { get set }
     var localNetworkDenied: Bool { get }
     var remoteHost: NWEndpoint.Host? { get }
     var sendsPointerInline: Bool { get }   // true: pointer positions go through send(), not the UDP side channel
@@ -60,6 +61,7 @@ protocol ScreenLink: AnyObject {
 final class Link: ScreenLink {
     let sendsPointerInline = false
     var onInput: (([String: Any]) -> Void)?
+    var onProbeAck: ((UInt32, Double) -> Void)?
     let conn: NWConnection
     private let q = DispatchQueue(label: "encorescreen.link", qos: .userInteractive)
     private var inflight = 0
@@ -129,6 +131,10 @@ final class Link: ScreenLink {
             self.conn.receive(minimumIncompleteLength: len, maximumLength: len) { body, _, _, err2 in
                 guard let body, body.count == len, err2 == nil else { self.conn.cancel(); return }
                 let m = [UInt8](body)
+                if m[0] == Proto.probeAck, m.count >= 5 {
+                    let id = UInt32(m[1]) << 24 | UInt32(m[2]) << 16 | UInt32(m[3]) << 8 | UInt32(m[4])
+                    self.onProbeAck?(id, 0)
+                }
                 if m[0] == Proto.hello, m.count >= 9 {
                     func u16(_ i: Int) -> Int { Int(m[i]) << 8 | Int(m[i + 1]) }
                     let (w, h, mw, mh) = (u16(1), u16(3), u16(5), u16(7))
@@ -254,6 +260,10 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     private var keepAlive: Timer?
     private var cursor: CursorStreamer?
     private var focusTimer: Timer?
+    private var probeSent: [UInt32: CFAbsoluteTime] = [:]
+    private var probeID: UInt32 = 0
+    private(set) var latency: [Double] = []      // round trips in ms
+    private(set) var decodeTimes: [Double] = []
     private var lastFocus: CGRect?? = .none
     private(set) var streaming = false
     var onStateChange: (() -> Void)?
@@ -275,6 +285,15 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func start() {
         (link as? Link)?.screenName = name
+        link.onProbeAck = { [weak self] id, decodeMs in
+            DispatchQueue.main.async {
+                guard let self, let t = self.probeSent.removeValue(forKey: id) else { return }
+                let rtt = (CFAbsoluteTimeGetCurrent() - t) * 1000
+                self.latency.append(rtt)
+                if decodeMs > 0 { self.decodeTimes.append(decodeMs) }
+                if self.latency.count > 300 { self.latency.removeFirst(); }
+            }
+        }
         link.onInput = { [weak self] m in
             DispatchQueue.main.async {
                 guard let self, let id = self.screen?.displayID else { return }
@@ -382,6 +401,13 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                         ticks += 1
                         // Heartbeat: lets the receiver notice a dead connection even on a still screen.
                         if ticks % 2 == 0 { _ = self.link.send(type: Proto.ping, payload: Data()) }
+                        // Latency probe, once a second, through the same channel as the frames.
+                        if ticks % 2 == 1 {
+                            self.probeID &+= 1
+                            let id = self.probeID
+                            self.probeSent[id] = CFAbsoluteTimeGetCurrent()
+                            _ = self.link.send(type: Proto.probe, payload: Data([UInt8(id >> 24), UInt8((id >> 16) & 255), UInt8((id >> 8) & 255), UInt8(id & 255)]))
+                        }
                         guard let enc = self.encoder, enc.forceKey, let pb = self.lastFrame,
                               Date().timeIntervalSince(self.lastFrameTime) > 0.3 else { return }
                         enc.encode(pb, pts: CMClockGetTime(CMClockGetHostTimeClock()))

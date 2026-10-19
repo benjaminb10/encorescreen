@@ -26,7 +26,6 @@ enum TouchInput {
     // x, y: 0…1 on the extra screen. Messages come from the page as JSON: {"t": "tap" | "double" | "right" |
     // "scroll" | "zoom", "x", "y", "dx", "dy", "dir"}.
     static func handle(_ m: [String: Any], displayID: CGDirectDisplayID) {
-        debug("input \(m["t"] ?? "?") enabled=\(enabled) trusted=\(AXIsProcessTrusted())")
         guard enabled, allowed() else { return }
         let b = CGDisplayBounds(displayID)
         let x = (m["x"] as? Double ?? 0.5), y = (m["y"] as? Double ?? 0.5)
@@ -130,11 +129,4 @@ func focusedTextField(on displayID: CGDirectDisplayID) -> CGRect? {
     let center = CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
     guard b.contains(center) else { return nil }
     return CGRect(x: (pos.x - b.minX) / b.width, y: (pos.y - b.minY) / b.height, width: size.width / b.width, height: size.height / b.height)
-}
-
-// Temporary diagnostics (written to /tmp/encorescreen-debug.log).
-func debug(_ s: String) {
-    let line = "\(Date()) \(s)\n"
-    if let h = FileHandle(forWritingAtPath: "/tmp/encorescreen-debug.log") { h.seekToEndOfFile(); h.write(Data(line.utf8)); h.closeFile() }
-    else { try? line.write(toFile: "/tmp/encorescreen-debug.log", atomically: true, encoding: .utf8) }
 }

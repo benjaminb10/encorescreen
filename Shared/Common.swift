@@ -15,6 +15,8 @@ enum Proto {
     static let cursorPos: UInt8 = 6    // main → browser screen only: pointer position (native screens get it over UDP)
     static let cursorShape: UInt8 = 7  // main → screen: pointer image (position goes over UDP, see Cursor.swift)
     static let textFocus: UInt8 = 9    // main → browser screen: a text field is (or isn't) focused there, JSON {"on", "x", "y", "w", "h"}
+    static let probe: UInt8 = 11       // main → screen: latency probe [u32 id]; the screen echoes it back as probeAck
+    static let probeAck: UInt8 = 10    // screen → main: [u32 id][u16 decode time in 0.1 ms, browser only]
     static let denied: UInt8 = 8       // main → screen: this device was not allowed (wrong link, or refused on the Mac)
 }
 

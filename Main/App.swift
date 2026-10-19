@@ -278,7 +278,17 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             b.toolTip = "Click to disconnect"
             menu.addItem(b)
         }
-        menu.addItem(item("Add Any Device with a Browser…", #selector(showQR), symbol: "qrcode"))
+        let add = NSMenuItem(title: "Add a Screen", action: nil, keyEquivalent: "")
+        add.image = NSImage(systemSymbolName: "plus.rectangle.on.rectangle", accessibilityDescription: nil)
+        let addMenu = NSMenu()
+        let qr = item("Phone, Tablet or Computer (Scan a QR Code)…", #selector(showQR), symbol: "qrcode")
+        qr.toolTip = "Nothing to install: open the link in a browser on the device."
+        addMenu.addItem(qr)
+        let mac = item("Another Mac (Best Quality)…", #selector(showMacHelp), symbol: "desktopcomputer")
+        mac.toolTip = "Install Encore Screen on the other Mac too. Smoothest option, ideal for an older iMac or MacBook."
+        addMenu.addItem(mac)
+        add.submenu = addMenu
+        menu.addItem(add)
 
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
@@ -304,6 +314,16 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         settings.submenu = sub
         menu.addItem(settings)
         menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))
+    }
+
+    @objc private func showMacHelp() {
+        let alert = NSAlert()
+        alert.messageText = "Use another Mac as your extra screen"
+        alert.informativeText = "Install Encore Screen on the other Mac (macOS 10.15 or later), open it and choose \u{201C}Make this an extra screen\u{201D}. It shows up here automatically, on the same Wi-Fi.\n\nThis is the smoothest option, and it starts by itself with the other Mac."
+        alert.icon = NSApp.applicationIconImage
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func forgetDevices() { ApprovedDevices.forgetAll() }
