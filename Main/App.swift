@@ -209,74 +209,84 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let title = NSMenuItem(title: "Encore Screen", action: nil, keyEquivalent: "")
-        title.isEnabled = false
-        menu.addItem(title)
-        let status: String
-        if let name = activeName { status = session?.streaming == true ? "Streaming to \(name)" : "Connecting to \(name)…" }
-        else { status = "Not streaming" }
-        menu.addItem(disabled(status))
-        if let err = lastError { menu.addItem(disabled("⚠︎ " + err)) }
+
+        // Header: mascot, name, and a live status line with a colored dot.
+        let status: String, color: NSColor
+        if let name = activeName, session?.streaming == true { status = "Live on \(name)"; color = .systemGreen }
+        else if let name = activeName { status = "Connecting to \(name)…"; color = .systemOrange }
+        else if let err = lastError { status = err; color = .systemRed }
+        else if receivers.isEmpty { status = "Looking for your other Mac…"; color = .systemGray }
+        else { status = "Ready"; color = .systemGray }
+        let header = NSMenuItem()
+        header.view = MenuHeaderView(status: status, dot: color)
+        menu.addItem(header)
         if localNetworkDenied || lastError == Messages.localNetwork {
-            let fix = NSMenuItem(title: "Open Local Network Settings…", action: #selector(openLocalNetwork), keyEquivalent: "")
-            fix.target = self
-            menu.addItem(fix)
+            menu.addItem(item("Allow Local Network Access…", #selector(openLocalNetwork), symbol: "exclamationmark.triangle.fill"))
         }
 
         // The one-click action: unplug or plug back the extra screen.
         if session != nil {
-            let stop = NSMenuItem(title: "Stop Streaming", action: #selector(toggleStreaming), keyEquivalent: "s")
+            let stop = item("Stop Extra Screen", #selector(toggleStreaming), key: "s", symbol: "stop.circle")
             stop.keyEquivalentModifierMask = [.control, .option, .command]
-            stop.target = self
-            stop.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: nil)
             menu.addItem(stop)
         } else if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil {
-            let start = NSMenuItem(title: "Start Streaming to \(name)", action: #selector(toggleStreaming), keyEquivalent: "s")
+            let start = item("Start Extra Screen on \(name)", #selector(toggleStreaming), key: "s", symbol: "play.circle")
             start.keyEquivalentModifierMask = [.control, .option, .command]
-            start.target = self
-            start.image = NSImage(systemSymbolName: "play.circle.fill", accessibilityDescription: nil)
             menu.addItem(start)
         }
 
         menu.addItem(.separator())
-        menu.addItem(disabled("Available screens"))
+        menu.addItem(.sectionHeader(title: "Screens"))
         if receivers.isEmpty {
-            menu.addItem(disabled("None yet: open Encore Screen on your other Mac"))
+            let none = NSMenuItem(title: "Open Encore Screen on your other Mac", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
         }
         for name in receivers.keys.sorted() {
-            let item = NSMenuItem(title: name, action: #selector(toggleReceiver(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = name
-            item.state = activeName == name ? .on : .off
-            item.indentationLevel = 1
-            menu.addItem(item)
+            let screen = item(name, #selector(toggleReceiver(_:)), symbol: "display")
+            screen.representedObject = name
+            screen.state = activeName == name ? .on : .off
+            menu.addItem(screen)
         }
 
         menu.addItem(.separator())
-        let air = NSMenuItem(title: "Pause AirDrop while streaming", action: #selector(toggleAirDrop), keyEquivalent: "")
-        air.target = self
-        air.state = cutAirDrop ? .on : .off
-        menu.addItem(air)
-        let smart = NSMenuItem(title: "Keep AirDrop On While the Screen Is Still", action: #selector(toggleSmartAirDrop), keyEquivalent: "")
-        smart.target = self
-        smart.state = smartAirDrop ? .on : .off
-        smart.isEnabled = cutAirDrop
-        smart.indentationLevel = 1
-        menu.addItem(smart)
-        let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        login.target = self
+        let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        let sub = NSMenu()
+        sub.addItem(.sectionHeader(title: "AirDrop while the extra screen is on"))
+        for (title, mode) in [("Pause only while things move (recommended)", 0), ("Always pause", 1), ("Never pause", 2)] {
+            let m = item(title, #selector(setAirDropMode(_:)))
+            m.tag = mode
+            m.state = airDropMode == mode ? .on : .off
+            sub.addItem(m)
+        }
+        sub.addItem(.separator())
+        let login = item("Open at Login", #selector(toggleLogin))
         login.state = LoginItem.enabled ? .on : .off
-        menu.addItem(login)
-        let setup = NSMenuItem(title: "Setup Assistant…", action: #selector(openOnboarding), keyEquivalent: "")
-        setup.target = self
-        menu.addItem(setup)
-        let role = NSMenuItem(title: "Switch Role…", action: #selector(switchRole), keyEquivalent: "")
-        role.target = self
-        menu.addItem(role)
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Encore Screen", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+        sub.addItem(login)
+        sub.addItem(.separator())
+        sub.addItem(item("Setup Assistant…", #selector(openOnboarding)))
+        sub.addItem(item("Switch Role…", #selector(switchRole)))
+        settings.submenu = sub
+        menu.addItem(settings)
+        menu.addItem(item("Quit Encore Screen", #selector(quit), key: "q"))
+    }
+
+    // 0 = pause only while moving, 1 = always pause, 2 = never pause.
+    private var airDropMode: Int { !cutAirDrop ? 2 : smartAirDrop ? 0 : 1 }
+
+    @objc private func setAirDropMode(_ sender: NSMenuItem) {
+        if sender.tag != 2 && !AirDrop.helperInstalled { AirDrop.installHelper() }
+        cutAirDrop = sender.tag != 2
+        smartAirDrop = sender.tag == 0
+        if sender.tag == 2 { airDropPaused = false; AirDrop.set(enabled: true) }
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "", symbol: String? = nil) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        i.target = self
+        if let symbol { i.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+        return i
     }
 
     private func disabled(_ t: String) -> NSMenuItem {
@@ -344,6 +354,32 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         autoConnect()
     }
+}
+
+// Top of the menu bar menu: the mascot, the app name and a status line with a colored dot.
+final class MenuHeaderView: NSView {
+    init(status: String, dot: NSColor) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 52))
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.frame = NSRect(x: 14, y: 8, width: 36, height: 36)
+        addSubview(icon)
+        let name = NSTextField(labelWithString: "Encore Screen")
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+        name.frame = NSRect(x: 58, y: 26, width: 210, height: 17)
+        addSubview(name)
+        let circle = NSView(frame: NSRect(x: 58, y: 13, width: 8, height: 8))
+        circle.wantsLayer = true
+        circle.layer?.backgroundColor = dot.cgColor
+        circle.layer?.cornerRadius = 4
+        addSubview(circle)
+        let line = NSTextField(labelWithString: status)
+        line.font = .systemFont(ofSize: 12)
+        line.textColor = .secondaryLabelColor
+        line.lineBreakMode = .byTruncatingTail
+        line.frame = NSRect(x: 72, y: 8, width: 196, height: 16)
+        addSubview(line)
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 @available(macOS 14.0, *)
