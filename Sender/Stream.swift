@@ -10,6 +10,9 @@ enum Proto {
     static let params: UInt8 = 1   // sender → receiver: SPS + PPS
     static let frame: UInt8 = 2    // sender → receiver: H.264 frame (AVCC)
     static let hello: UInt8 = 3    // receiver → sender: screen size
+    static let bye: UInt8 = 4      // sender → receiver: streaming stopped on purpose
+    static let ping: UInt8 = 5     // sender → receiver: heartbeat, every second
+    static let cursorShape: UInt8 = 7  // sender → receiver: pointer image (position goes over UDP, see Cursor.swift)
 }
 
 func log(_ s: String) { NSLog("[SpareScreen] %@", s) }
@@ -67,9 +70,27 @@ final class Link {
             }
         }
         conn.start(queue: q)
+        // A connection blocked by macOS (e.g. Local Network permission) can hang forever: give up after 5 s and retry.
+        q.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.conn.state != .ready else { return }
+            self.conn.cancel()
+        }
     }
 
     func stop() { conn.cancel() }
+
+    var remoteHost: NWEndpoint.Host? {
+        if case let .hostPort(host, _) = conn.currentPath?.remoteEndpoint { return host }
+        return nil
+    }
+
+    // Tell the receiver we are leaving, then close once the message is out (or after 1 s at worst).
+    func sayGoodbye() {
+        var msg = Data([0, 0, 0, 1])
+        msg.append(Proto.bye)
+        conn.send(content: msg, completion: .contentProcessed { [weak self] _ in self?.conn.cancel() })
+        q.asyncAfter(deadline: .now() + 1) { [weak self] in self?.conn.cancel() }
+    }
 
     private func finish() {
         guard !closed else { return }
@@ -195,6 +216,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastFrame: CVPixelBuffer?
     private var lastFrameTime = Date()
     private var keepAlive: Timer?
+    private var cursor: CursorStreamer?
     private(set) var streaming = false
     var onStateChange: (() -> Void)?
     var onEnd: ((String?) -> Void)?
@@ -216,7 +238,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
         link.start()
     }
 
-    func stop() { link.stop() }
+    func stop() { link.sayGoodbye() }
 
     private func begin(width: Int, height: Int, sizeMM: CGSize) {
         var w = width, h = height
@@ -238,7 +260,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                 cfg.height = height
                 cfg.minimumFrameInterval = CMTime(value: 1, timescale: 60)
                 cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-                cfg.showsCursor = true
+                cfg.showsCursor = false   // the receiver draws the pointer itself (Cursor.swift)
                 cfg.queueDepth = 5
                 guard let enc = Encoder(width: width, height: height, bitrate: bitrate, link: link) else {
                     endReason = "Video encoder unavailable."; link.stop(); return
@@ -256,9 +278,17 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
                 await MainActor.run {
                     self.stream = s
                     self.streaming = true
+                    let cs = CursorStreamer(displayID: displayID, link: self.link)
+                    cs.start()
+                    self.cursor = cs
                     // Static screen: resend the last frame after a drop so the receiver never stays stuck on a broken picture.
+                    var ticks = 0
                     self.keepAlive = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-                        guard let self, let enc = self.encoder, enc.forceKey, let pb = self.lastFrame,
+                        guard let self else { return }
+                        ticks += 1
+                        // Heartbeat: lets the receiver notice a dead connection even on a still screen.
+                        if ticks % 2 == 0 { _ = self.link.send(type: Proto.ping, payload: Data()) }
+                        guard let enc = self.encoder, enc.forceKey, let pb = self.lastFrame,
                               Date().timeIntervalSince(self.lastFrameTime) > 0.3 else { return }
                         enc.encode(pb, pts: CMClockGetTime(CMClockGetHostTimeClock()))
                     }
@@ -289,6 +319,7 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func teardown() {
         keepAlive?.invalidate(); keepAlive = nil
+        cursor?.stop(); cursor = nil
         stream?.stopCapture { _ in }
         stream = nil
         encoder = nil

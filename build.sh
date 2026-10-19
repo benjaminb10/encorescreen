@@ -10,6 +10,7 @@ bundle() { # $1 name, $2 binary, $3 bundle id, $4 minimum macOS, $5 LSUIElement 
   local app="build/$1.app"
   mkdir -p "$app/Contents/MacOS"
   cp "$2" "$app/Contents/MacOS/$6"
+  ./fix-uuid.py "$app/Contents/MacOS/$6" "$3"
   mkdir -p "$app/Contents/Resources"
   cp "Icons/$6.icns" "$app/Contents/Resources/AppIcon.icns"
   cat > "$app/Contents/Info.plist" <<EOF

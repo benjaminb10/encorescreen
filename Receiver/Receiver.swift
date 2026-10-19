@@ -14,9 +14,16 @@ final class Receiver {
     private var conn: NWConnection?
     private var format: CMVideoFormatDescription?
     private let q = DispatchQueue(label: "sparescreen.recv", qos: .userInteractive)
+    private var lastReceived = Date()
+    private var watchdog: DispatchSourceTimer?
     var onConnect: ((String) -> Void)?
     var onDisconnect: (() -> Void)?
     var onSample: ((CMSampleBuffer) -> Void)?
+    var onVideoSize: ((CGSize) -> Void)?
+    var onCursorShape: ((CGImage, CGPoint, CGSize) -> Void)?
+    var onCursorMove: ((CGFloat, CGFloat, Bool) -> Void)?
+    private var cursorListener: NWListener?
+    private var cursorSeq: UInt16 = 0
 
     func start() {
         let tcp = NWProtocolTCP.Options()
@@ -29,6 +36,47 @@ final class Receiver {
         l.stateUpdateHandler = { st in log("listener: \(st)") }
         l.start(queue: q)
         listener = l
+        // The sender pings every second. Silence for 4 s means it is gone (sleep, Wi-Fi drop): go back home.
+        let t = DispatchSource.makeTimerSource(queue: q)
+        t.schedule(deadline: .now() + 1, repeating: 1)
+        t.setEventHandler { [weak self] in
+            guard let self, let c = self.conn, Date().timeIntervalSince(self.lastReceived) > 4 else { return }
+            log("no data for 4 s, closing")
+            c.cancel()
+        }
+        t.resume()
+        watchdog = t
+        startCursorChannel()
+    }
+
+    // Pointer positions arrive as small UDP datagrams, see Cursor.swift on the sender.
+    private func startCursorChannel() {
+        guard let l = try? NWListener(using: .udp, on: 7778) else { log("port 7778 unavailable"); return }
+        l.newConnectionHandler = { [weak self] c in
+            c.start(queue: self?.q ?? .main)
+            self?.readCursor(c)
+        }
+        l.start(queue: q)
+        cursorListener = l
+    }
+
+    private func readCursor(_ c: NWConnection) {
+        c.receiveMessage { [weak self] data, _, _, err in
+            guard let self, err == nil else { return }
+            if let d = data, d.count >= 8 {
+                let b = [UInt8](d)
+                let seq = UInt16(b[1]) << 8 | UInt16(b[2])
+                // Ignore datagrams that arrive out of order.
+                if b[0] == 6, Int16(bitPattern: seq &- self.cursorSeq) > 0 || self.cursorSeq == 0 {
+                    self.cursorSeq = seq
+                    let x = CGFloat(UInt16(b[3]) << 8 | UInt16(b[4])) / 65535
+                    let y = CGFloat(UInt16(b[5]) << 8 | UInt16(b[6])) / 65535
+                    let visible = b[7] == 1
+                    DispatchQueue.main.async { self.onCursorMove?(x, y, visible) }
+                }
+            }
+            self.readCursor(c)
+        }
     }
 
     func closeConnection() { q.async { self.conn?.cancel() } }
@@ -37,6 +85,8 @@ final class Receiver {
         conn?.cancel()
         conn = c
         format = nil
+        cursorSeq = 0
+        lastReceived = Date()
         c.stateUpdateHandler = { [weak self, weak c] st in
             guard let self, let c else { return }
             switch st {
@@ -86,6 +136,8 @@ final class Receiver {
             c.receive(minimumIncompleteLength: len, maximumLength: len) { body, _, _, err2 in
                 guard let body, body.count == len, err2 == nil else { c.cancel(); return }
                 let p = Data(body)
+                self.lastReceived = Date()
+                if p[0] == 4 { c.cancel(); return }   // sender stopped streaming
                 self.handle(type: p[0], payload: p.subdata(in: 1..<p.count))
                 self.readHeader(c)
             }
@@ -113,7 +165,19 @@ final class Receiver {
                                                                         nalUnitHeaderLength: 4, formatDescriptionOut: &fd)
                 }
             }
+            if let fd, fd != format {
+                let dim = CMVideoFormatDescriptionGetDimensions(fd)
+                DispatchQueue.main.async { self.onVideoSize?(CGSize(width: Int(dim.width), height: Int(dim.height))) }
+            }
             format = fd
+        } else if type == 7, p.count > 8 {
+            let b = [UInt8](p)
+            func v(_ i: Int) -> CGFloat { CGFloat(UInt16(b[i]) << 8 | UInt16(b[i + 1])) / 16 }
+            let hot = CGPoint(x: v(0), y: v(2)), size = CGSize(width: v(4), height: v(6))
+            if let src = CGImageSourceCreateWithData(p.subdata(in: 8..<p.count) as CFData, nil),
+               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+                DispatchQueue.main.async { self.onCursorShape?(img, hot, size) }
+            }
         } else if type == 2, let fd = format {
             var bb: CMBlockBuffer?
             CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: p.count, blockAllocator: nil,
@@ -208,6 +272,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var home: NSWindow!
     var full: NSWindow!
     var layer = AVSampleBufferDisplayLayer()
+    let cursorLayer = CALayer()
+    var videoSize = CGSize(width: 1920, height: 1080)
+    var cursorHot = CGPoint.zero
+    var cursorSize = CGSize(width: 17, height: 23)
     var status: NSTextField!
     let receiver = Receiver()
     var activity: NSObjectProtocol?
@@ -222,6 +290,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         receiver.onConnect = { [weak self] who in self?.status.stringValue = "Connecting…"; self?.enterFullscreen() }
         receiver.onDisconnect = { [weak self] in self?.leaveFullscreen() }
+        receiver.onVideoSize = { [weak self] size in self?.videoSize = size }
+        receiver.onCursorShape = { [weak self] img, hot, size in
+            guard let self else { return }
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            self.cursorLayer.contents = img
+            self.cursorHot = hot
+            self.cursorSize = size
+            CATransaction.commit()
+        }
+        receiver.onCursorMove = { [weak self] x, y, visible in self?.moveCursor(x: x, y: y, visible: visible) }
         receiver.onSample = { [weak self] s in
             guard let self else { return }
             if self.layer.status == .failed { self.layer.flush() }
@@ -355,6 +433,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         layer.videoGravity = .resizeAspect
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer?.addSublayer(layer)
+        cursorLayer.zPosition = 10
+        cursorLayer.isHidden = true
+        cursorLayer.contentsGravity = .resize
+        view.layer?.addSublayer(cursorLayer)
         full.contentView = view
     }
 
@@ -368,8 +450,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .latencyCritical], reason: "SpareScreen")
     }
 
+    // Where the video sits inside the full screen window (aspect fit), in layer coordinates (origin bottom-left).
+    private var videoRect: CGRect {
+        let bounds = layer.bounds
+        guard videoSize.width > 0, videoSize.height > 0 else { return bounds }
+        let k = min(bounds.width / videoSize.width, bounds.height / videoSize.height)
+        let w = videoSize.width * k, h = videoSize.height * k
+        return CGRect(x: bounds.midX - w / 2, y: bounds.midY - h / 2, width: w, height: h)
+    }
+
+    private func moveCursor(x: CGFloat, y: CGFloat, visible: Bool) {
+        let r = videoRect
+        let k = r.width / videoSize.width   // stream pixels are points on the sender's virtual display
+        let px = r.minX + x * r.width, py = r.maxY - y * r.height
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        cursorLayer.isHidden = !visible || cursorLayer.contents == nil
+        cursorLayer.frame = CGRect(x: px - cursorHot.x * k, y: py - (cursorSize.height - cursorHot.y) * k,
+                                   width: cursorSize.width * k, height: cursorSize.height * k)
+        CATransaction.commit()
+    }
+
     private func leaveFullscreen() {
         layer.flushAndRemoveImage()
+        cursorLayer.isHidden = true
         full.orderOut(nil)
         NSApp.presentationOptions = []
         NSCursor.unhide()
