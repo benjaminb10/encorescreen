@@ -59,7 +59,8 @@ mkdir -p build/dmg && cp -R "$APP" build/dmg/ && ln -s /Applications build/dmg/A
 hdiutil create -quiet -volname "Encore Screen" -srcfolder build/dmg -ov -format UDZO build/EncoreScreen.dmg
 rm -rf build/dmg
 
-if [[ -n $DEVID ]]; then
+# SKIP_NOTARIZE=1 for a quick local install (notarization only matters for downloaded copies).
+if [[ -n $DEVID && -z $SKIP_NOTARIZE ]]; then
   codesign --force --timestamp --sign "$DEVID" build/EncoreScreen.dmg
   xcrun notarytool submit build/EncoreScreen.dmg --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple build/EncoreScreen.dmg

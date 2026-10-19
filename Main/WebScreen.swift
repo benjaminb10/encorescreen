@@ -34,7 +34,9 @@ final class WebLink: ScreenLink {
         var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         guard getnameinfo(a.pointee.ai_addr, a.pointee.ai_addrlen, &host, socklen_t(host.count), nil, 0, NI_NAMEREQD) == 0 else { return nil }
         let name = String(cString: host).components(separatedBy: ".").first ?? ""
-        return name.isEmpty ? nil : name
+        // Apple devices often answer with a random private name (a UUID): not useful, fall back to the IP.
+        if name.isEmpty || name.range(of: "^[0-9a-fA-F-]{30,}$", options: .regularExpression) != nil { return nil }
+        return name
     }
 
     func start() {
@@ -258,10 +260,12 @@ canvas{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;cursor:n
 <script>
 const msg=document.getElementById('msg'),cv=document.getElementById('v'),ctx=cv.getContext('2d'),ptr=document.getElementById('p');
 let sent=null,resizeTimer;
-// Rotation or resize: reconnect so the Mac recreates the extra screen at the new size.
+// Rotation: reconnect so the Mac recreates the extra screen in the new orientation. Only a real orientation change
+// counts: on phones the visible height changes all the time (toolbars showing and hiding), which must not reconnect.
+const landscape=()=>innerWidth>innerHeight;
 addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
- if(!sent||!ws||ws.readyState!==1)return;if(Math.abs(innerWidth-sent[0])<40&&Math.abs(innerHeight-sent[1])<40)return;
- ws.onclose=null;ws.close();cfg='';needKey=true;vw=0;connect()},700)});
+ if(!sent||!ws||ws.readyState!==1)return;if(landscape()===(sent[0]>sent[1]))return;
+ ws.onclose=null;ws.close();cfg='';needKey=true;vw=0;connect()},800)});
 let ws,dec,cfg='',needKey=true,vw=0,vh=0,hot=[0,0],ps=[0,0],ts=0,denied=false;
 const key=(location.hash.match(/k=([a-z0-9]+)/)||[])[1]||'';
 let id=localStorage.getItem('es-id');if(!id){id=crypto.getRandomValues(new Uint32Array(4)).join('-');localStorage.setItem('es-id',id)}
