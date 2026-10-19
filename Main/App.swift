@@ -292,6 +292,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             sub.addItem(m)
         }
         sub.addItem(.separator())
+        let touch = item("Touch Control on Phones and Tablets", #selector(toggleTouch))
+        touch.state = TouchInput.enabled ? .on : .off
+        sub.addItem(touch)
         sub.addItem(item("Forget Allowed Screens", #selector(forgetDevices)))
         let login = item("Open at Login", #selector(toggleLogin))
         login.state = LoginItem.enabled ? .on : .off
@@ -304,6 +307,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 
     @objc private func forgetDevices() { ApprovedDevices.forgetAll() }
+    @objc private func toggleTouch() { TouchInput.enabled.toggle() }
 
     @objc private func stopWebScreen(_ sender: NSMenuItem) { (sender.representedObject as? Session)?.stop() }
 

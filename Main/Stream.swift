@@ -45,6 +45,7 @@ final class VirtualScreen {
 protocol ScreenLink: AnyObject {
     var onHello: ((Hello) -> Void)? { get set }
     var onClose: (() -> Void)? { get set }
+    var onInput: (([String: Any]) -> Void)? { get set }   // touch gestures (browser screens only)
     var localNetworkDenied: Bool { get }
     var remoteHost: NWEndpoint.Host? { get }
     var sendsPointerInline: Bool { get }   // true: pointer positions go through send(), not the UDP side channel
@@ -58,6 +59,7 @@ protocol ScreenLink: AnyObject {
 @available(macOS 14.0, *)
 final class Link: ScreenLink {
     let sendsPointerInline = false
+    var onInput: (([String: Any]) -> Void)?
     let conn: NWConnection
     private let q = DispatchQueue(label: "encorescreen.link", qos: .userInteractive)
     private var inflight = 0
@@ -271,6 +273,12 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func start() {
         (link as? Link)?.screenName = name
+        link.onInput = { [weak self] m in
+            DispatchQueue.main.async {
+                guard let self, let id = self.screen?.displayID else { return }
+                TouchInput.handle(m, displayID: id)
+            }
+        }
         link.onHello = { [weak self] hello in
             guard let self else { return }
             guard let approve = self.approve else { self.begin(hello); return }

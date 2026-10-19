@@ -13,6 +13,7 @@ final class WebLink: ScreenLink {
     let localNetworkDenied = false
     var onHello: ((Hello) -> Void)?
     var onClose: (() -> Void)?
+    var onInput: (([String: Any]) -> Void)?
     private let q = DispatchQueue(label: "encorescreen.web", qos: .userInteractive)
     private var inflight = 0
     private var closed = false
@@ -68,6 +69,11 @@ final class WebLink: ScreenLink {
         conn.receiveMessage { [weak self] data, ctx, _, err in
             guard let self, err == nil else { self?.conn.cancel(); return }
             if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+               meta.opcode == .text,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               json["t"] != nil {
+                self.onInput?(json)
+            } else if let data, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .text,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let w = json["w"] as? Int, let h = json["h"] as? Int {
@@ -309,6 +315,28 @@ function move(p){if(!vw)return;const x=((p[2]<<8)|p[3])/65535,y=((p[4]<<8)|p[5])
  const W=innerWidth,H=innerHeight,k=Math.min(W/vw,H/vh),rx=(W-vw*k)/2,ry=(H-vh*k)/2;
  ptr.style.display=vis&&ptr.src?'block':'none';ptr.style.width=ps[0]*k+'px';ptr.style.height=ps[1]*k+'px';
  ptr.style.transform='translate('+(rx+x*vw*k-hot[0]*k)+'px,'+(ry+y*vh*k-hot[1]*k)+'px)'}
+// Touch control: tap = click, double tap = double click, long press = right click,
+// one finger drag = scroll, pinch = zoom. Positions are sent as 0…1 on the extra screen.
+cv.style.touchAction='none';
+let touch=null,lastTap=0,pinch=null,longTimer=null;
+function pos(t){const W=innerWidth,H=innerHeight,k=Math.min(W/vw,H/vh),rx=(W-vw*k)/2,ry=(H-vh*k)/2;
+ return {x:Math.min(1,Math.max(0,(t.clientX-rx)/(vw*k))),y:Math.min(1,Math.max(0,(t.clientY-ry)/(vh*k))),k}}
+function sendInput(m){if(ws&&ws.readyState===1&&vw)ws.send(JSON.stringify(m))}
+cv.addEventListener('touchstart',e=>{e.preventDefault();
+ if(e.touches.length===2){clearTimeout(longTimer);touch=null;const[a,b]=e.touches;
+  pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),mid:{clientX:(a.clientX+b.clientX)/2,clientY:(a.clientY+b.clientY)/2}};return}
+ const t=e.touches[0];touch={x0:t.clientX,y0:t.clientY,x:t.clientX,y:t.clientY,t0:Date.now(),moved:false,long:false};
+ longTimer=setTimeout(()=>{if(touch&&!touch.moved){touch.long=true;const p=pos(t);sendInput({t:'right',x:p.x,y:p.y})}},550)},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();
+ if(pinch&&e.touches.length===2){const[a,b]=e.touches,d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),p=pos(pinch.mid);
+  if(d/pinch.d>1.25){sendInput({t:'zoom',dir:'in',x:p.x,y:p.y});pinch.d=d}else if(d/pinch.d<0.8){sendInput({t:'zoom',dir:'out',x:p.x,y:p.y});pinch.d=d}return}
+ if(!touch)return;const t=e.touches[0],dx=t.clientX-touch.x,dy=t.clientY-touch.y;
+ if(Math.hypot(t.clientX-touch.x0,t.clientY-touch.y0)>8){touch.moved=true;clearTimeout(longTimer)}
+ if(touch.moved){const p=pos(t);sendInput({t:'scroll',x:p.x,y:p.y,dx:dx/p.k,dy:dy/p.k});touch.x=t.clientX;touch.y=t.clientY}},{passive:false});
+cv.addEventListener('touchend',e=>{e.preventDefault();clearTimeout(longTimer);
+ if(e.touches.length===0)pinch=null;if(!touch||touch.moved||touch.long){touch=null;return}
+ const p=pos({clientX:touch.x0,clientY:touch.y0}),now=Date.now();
+ if(now-lastTap<300){sendInput({t:'double',x:p.x,y:p.y});lastTap=0}else{sendInput({t:'tap',x:p.x,y:p.y});lastTap=now}touch=null},{passive:false});
 function shape(p){const v=i=>((p[i]<<8)|p[i+1])/16;hot=[v(0),v(2)];ps=[v(4),v(6)];
  if(ptr.src)URL.revokeObjectURL(ptr.src);ptr.src=URL.createObjectURL(new Blob([p.slice(8)],{type:'image/png'}))}
 </script></body></html>
