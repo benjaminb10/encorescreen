@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Encore Screen · Give your old Mac an encore</title>
+<meta name="description" content="Turn an old Mac, an iPhone, an iPad or any tablet into a smooth wireless extra screen for your Mac. Free and open source.">
+<meta property="og:title" content="Encore Screen · Give your old Mac an encore">
+<meta property="og:description" content="Any device becomes a smooth wireless extra screen for your Mac. Free and open source.">
+<meta property="og:image" content="og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon-256.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --orange:#FFB347;--coral:#FF6B6B;--ink:#1E1B3A;--muted:#5b5874;--bg:#FFF8F1;--card:#ffffff;--line:rgba(30,27,58,.08);
+  --grad:linear-gradient(135deg,var(--orange),var(--coral));
+}
+@media (prefers-color-scheme:dark){
+  :root{--ink:#F6F1EA;--muted:#b9b3c9;--bg:#16131F;--card:#211d2c;--line:rgba(255,255,255,.08)}
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--ink);font:16px/1.6 Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+h1,h2,h3{font-family:Nunito,system-ui,sans-serif;line-height:1.1;margin:0}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 22px;border-radius:14px;font-weight:600;text-decoration:none;
+  transition:transform .15s ease,box-shadow .15s ease;cursor:pointer;border:0;font-size:16px}
+.btn:hover{transform:translateY(-2px)}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:0 10px 30px rgba(255,107,107,.35)}
+.btn-ghost{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
+.brand{display:flex;align-items:center;gap:10px;font-family:Nunito;font-weight:900;font-size:20px;text-decoration:none}
+.brand img{width:36px;height:36px}
+nav .links{display:flex;gap:22px;align-items:center;font-weight:500;color:var(--muted)}
+nav .links a{text-decoration:none}
+@media (max-width:640px){nav .links .hide-sm{display:none}.stage .chip{font-size:12px;padding:8px 10px}.support{padding:28px}}
+
+/* hero */
+.hero>*{min-width:0}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:56px 0 72px}
+@media (max-width:860px){.hero{grid-template-columns:1fr;text-align:center}.hero .ctas{justify-content:center}}
+.pill{display:inline-block;padding:6px 12px;border-radius:999px;background:rgba(255,107,107,.12);color:var(--coral);font-weight:600;font-size:13px;margin-bottom:18px}
+.hero h1{font-size:clamp(40px,6vw,68px);font-weight:900;letter-spacing:-.02em}
+.hero h1 span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.lead{font-size:20px;color:var(--muted);margin:20px 0 28px;max-width:560px}
+@media (max-width:860px){.hero p.lead{margin-left:auto;margin-right:auto}}
+.ctas{display:flex;gap:12px;flex-wrap:wrap}
+.req{font-size:13px;color:var(--muted);margin-top:14px}
+.stage{position:relative;display:flex;justify-content:center;align-items:center;min-height:340px}
+.stage .mascot{width:min(300px,70vw);filter:drop-shadow(0 30px 60px rgba(255,107,107,.35));animation:float 5s ease-in-out infinite}
+.stage .chip{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px;font-weight:600;font-size:14px;
+  box-shadow:0 10px 30px rgba(0,0,0,.08)}
+.chip.a{top:8%;left:2%}.chip.b{bottom:12%;left:0}.chip.c{top:22%;right:0}.chip.d{bottom:4%;right:6%}
+@keyframes float{50%{transform:translateY(-12px) rotate(-2deg)}}
+@media (prefers-reduced-motion:reduce){.stage .mascot{animation:none}}
+
+/* sections */
+section{padding:72px 0}
+.kicker{color:var(--coral);font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:13px}
+section h2{font-size:clamp(30px,4vw,44px);font-weight:900;margin:8px 0 14px;letter-spacing:-.01em}
+section .sub{color:var(--muted);max-width:640px;font-size:18px;margin:0}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:36px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:36px}
+@media (max-width:860px){.steps,.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px}
+.card .n{width:36px;height:36px;border-radius:50%;background:rgba(255,107,107,.14);color:var(--coral);display:grid;place-items:center;
+  font-family:Nunito;font-weight:900;margin-bottom:14px}
+.card .ico{font-size:28px;margin-bottom:10px}
+.card h3{font-size:20px;font-weight:800;margin-bottom:6px}
+.card p{margin:0;color:var(--muted)}
+.devices{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.devices span{padding:8px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-weight:600;font-size:14px}
+
+/* support */
+.support{background:var(--grad);color:#fff;border-radius:28px;padding:44px;display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center}
+.support h2{color:#fff;margin:0 0 8px}
+.support p{margin:0;opacity:.92;font-size:18px}
+.support .btn{background:#fff;color:#E2554F}
+@media (max-width:760px){.support{grid-template-columns:1fr;text-align:center;padding:32px}}
+
+/* faq */
+details{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-top:12px}
+summary{cursor:pointer;font-weight:600;font-size:17px;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";float:right;color:var(--coral);font-weight:800}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:12px 0 0}
+footer{padding:40px 0 56px;color:var(--muted);font-size:14px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#"><img src="icon-256.png" alt="">Encore Screen</a>
+    <div class="links">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a class="btn btn-primary" style="padding:10px 16px" href="#download">Download</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="download">
+    <div>
+      <div class="pill">Free and open source</div>
+      <h1>Give your old Mac an <span>encore.</span></h1>
+      <p class="lead">Turn an old Mac, your iPhone, an iPad or any tablet into a smooth wireless extra screen for your Mac. Drag a window over, and it just works.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="EncoreScreen.dmg" download>Download for Mac</a>
+        <a class="btn btn-ghost" href="#support">Support the project ☕</a>
+      </div>
+      <div class="req">Your main Mac: macOS 14 or later, Apple silicon or Intel. Signed and notarized by Apple.</div>
+    </div>
+    <div class="stage" aria-hidden="true">
+      <img class="mascot" src="icon.png" alt="">
+      <div class="chip a">iMac 2012 ✨</div>
+      <div class="chip b">iPhone</div>
+      <div class="chip c">iPad</div>
+      <div class="chip d">Android tablet</div>
+    </div>
+  </header>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="kicker">How it works</div>
+    <h2>Three steps, no cables.</h2>
+    <p class="sub">Encore Screen runs in your Mac's menu bar. The extra screen can be any device you already own.</p>
+    <div class="steps">
+      <div class="card"><div class="n">1</div><h3>Install it on your Mac</h3><p>A short setup asks macOS for the permissions any screen app needs. Once.</p></div>
+      <div class="card"><div class="n">2</div><h3>Add a screen</h3><p>Scan a QR code with your phone or tablet: nothing to install. Or open Encore Screen on an older Mac.</p></div>
+      <div class="card"><div class="n">3</div><h3>Drag a window over</h3><p>It's a real extended display. Place it left, right or above in System Settings.</p></div>
+    </div>
+    <div class="devices">
+      <span>💻 Older Macs (macOS 10.15+)</span><span>📱 iPhone</span><span>📲 iPad</span><span>🤖 Android</span><span>🖥 Windows PC</span><span>🌐 Any recent browser</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">Why it feels so smooth</div>
+    <h2>Built for real work, not a slideshow.</h2>
+    <div class="grid">
+      <div class="card"><div class="ico">⚡️</div><h3>Real video, hardware decoded</h3><p>Your extra screen is streamed as H.264 video, decoded by the device's own chip. Not a series of screenshots.</p></div>
+      <div class="card"><div class="ico">🖱</div><h3>Instant pointer</h3><p>The pointer travels on its own and is drawn on the screen side, like Sidecar does. It never lags behind your hand.</p></div>
+      <div class="card"><div class="ico">📶</div><h3>No Wi-Fi hiccups</h3><p>AirDrop makes Wi-Fi hop channels and causes stutter. Encore Screen pauses it only while things move, then turns it back on.</p></div>
+      <div class="card"><div class="ico">👆</div><h3>Touch and keyboard</h3><p>Tap, scroll and pinch on your phone or tablet. Touch a text field and your device's keyboard is one tap away.</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>Private by design</h3><p>Every new device must be allowed on your Mac. Links carry a secret key. No account, no cloud.</p></div>
+      <div class="card"><div class="ico">💛</div><h3>Free and open source</h3><p>No subscription, no trial clock. The code is open so you can see exactly what it does.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="support">
+  <div class="wrap">
+    <div class="support">
+      <div>
+        <h2>Like it? Buy me a coffee.</h2>
+        <p>Encore Screen is free. If it gave your old Mac a second life, a small tip keeps it going. You choose the amount.</p>
+      </div>
+      <a class="btn" id="support-link" href="SUPPORT_LINK" target="_blank" rel="noopener">Support Encore Screen ☕</a>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="kicker">FAQ</div>
+    <h2>Questions</h2>
+    <details><summary>What do I need?</summary><p>Your main Mac needs macOS 14 Sonoma or later. The extra screen can be a Mac with macOS 10.15 Catalina or later (with the free app), or any device with a recent browser: Chrome, Edge, Safari on iOS 16.4+, Firefox 130+.</p></details>
+    <details><summary>How is it different from Sidecar?</summary><p>Sidecar only works with recent iPads. Encore Screen works with the devices Sidecar ignores: older Macs, iPhones, Android tablets, PCs. If you have a recent iPad, Sidecar is great too.</p></details>
+    <details><summary>Do I need to install anything on the extra screen?</summary><p>Not on phones, tablets and computers: scan the QR code and you're done. On an older Mac, installing the app gives the smoothest result and starts by itself at login.</p></details>
+    <details><summary>Is it really free?</summary><p>Yes. No ads, no account, no limits. If you want to say thanks, there's a tip button.</p></details>
+    <details><summary>Does my screen go through the internet?</summary><p>No. Everything stays on your local Wi-Fi, between your own devices.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">Made with care by Benjamin Benoudis. Encore Screen is not affiliated with Apple.</div>
+</footer>
+</body>
+</html>
