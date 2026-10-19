@@ -111,10 +111,10 @@ enum ApprovedDevices {
     static func ask(_ hello: Hello, completion: @escaping (Bool) -> Void) {
         if contains(hello.deviceID) { completion(true); return }
         let alert = NSAlert()
-        alert.messageText = "Show your extra screen on \u{201C}\(hello.deviceName)\u{201D}?"
-        alert.informativeText = "A device on your network wants to become your extra screen. It will see everything you put on that screen. Only allow devices you own."
+        alert.messageText = "Use \u{201C}\(hello.deviceName)\u{201D} as your extra screen?"
+        alert.informativeText = "This device asked to show your extra screen. It will see everything you put on that screen. Only allow devices you own."
         alert.icon = NSApp.applicationIconImage
-        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Use as Extra Screen")
         alert.addButton(withTitle: "Don't Allow")
         NSApp.activate(ignoringOtherApps: true)
         let ok = alert.runModal() == .alertFirstButtonReturn

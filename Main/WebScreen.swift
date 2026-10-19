@@ -24,6 +24,19 @@ final class WebLink: ScreenLink {
         return nil
     }
 
+    // The device's name on the local network (e.g. "imac-de-benjamin"), friendlier than its IP address.
+    static func networkName(_ ip: String) -> String? {
+        var hints = addrinfo(ai_flags: AI_NUMERICHOST, ai_family: AF_UNSPEC, ai_socktype: 0, ai_protocol: 0,
+                             ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(ip, nil, &hints, &res) == 0, let a = res else { return nil }
+        defer { freeaddrinfo(res) }
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        guard getnameinfo(a.pointee.ai_addr, a.pointee.ai_addrlen, &host, socklen_t(host.count), nil, 0, NI_NAMEREQD) == 0 else { return nil }
+        let name = String(cString: host).components(separatedBy: ".").first ?? ""
+        return name.isEmpty ? nil : name
+    }
+
     func start() {
         conn.stateUpdateHandler = { [weak self] st in
             switch st {
@@ -59,7 +72,10 @@ final class WebLink: ScreenLink {
                 var hello = Hello(width: w, height: h, sizeMM: .zero, scale: json["scale"] as? Int ?? 1,
                                   deviceID: json["id"] as? String ?? "", deviceName: json["name"] as? String ?? "Browser",
                                   key: json["key"] as? String)
-                if let host = self.remoteHost { hello.deviceName += " (\(host))".replacingOccurrences(of: "%[^)]*", with: "", options: .regularExpression) }
+                if let host = self.remoteHost {
+                    let ip = "\(host)".replacingOccurrences(of: "%.*", with: "", options: .regularExpression)
+                    hello.deviceName += " (\(WebLink.networkName(ip) ?? ip))"
+                }
                 DispatchQueue.main.async { self.onHello?(hello) }
             }
             self.receive()
