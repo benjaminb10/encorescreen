@@ -9,7 +9,11 @@ import ScreenCaptureKit
 enum AirDrop {
     static let sudoersPath = "/etc/sudoers.d/encorescreen"
 
-    static var helperInstalled: Bool { FileManager.default.fileExists(atPath: sudoersPath) }
+    // The rule only allows "ifconfig awdl0 up/down", so the one installed under the app's former name works too.
+    static let legacySudoersPath = "/etc/sudoers.d/sparescreen"
+    static var helperInstalled: Bool {
+        FileManager.default.fileExists(atPath: sudoersPath) || FileManager.default.fileExists(atPath: legacySudoersPath)
+    }
 
     @discardableResult
     static func installHelper() -> Bool {
