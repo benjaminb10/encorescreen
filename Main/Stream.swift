@@ -49,7 +49,7 @@ final class Link {
     init(endpoint: NWEndpoint) {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
-        conn = NWConnection(to: endpoint, using: NWParameters(tls: nil, tcp: tcp))
+        conn = NWConnection(to: endpoint, using: Transport.apply(NWParameters(tls: nil, tcp: tcp)))
     }
 
     func start() {

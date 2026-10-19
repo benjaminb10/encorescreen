@@ -24,7 +24,9 @@ final class Receiver {
     func start() {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
-        guard let l = try? NWListener(using: NWParameters(tls: nil, tcp: tcp), on: NWEndpoint.Port(rawValue: Proto.videoPort)!) else {
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.includePeerToPeer = true   // reachable over the direct Wi-Fi link too (AWDL, like AirDrop)
+        guard let l = try? NWListener(using: params, on: NWEndpoint.Port(rawValue: Proto.videoPort)!) else {
             log("port 7777 unavailable"); return
         }
         l.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: Proto.serviceType)
@@ -47,7 +49,9 @@ final class Receiver {
 
     // Pointer positions arrive as small UDP datagrams, see Cursor.swift on the sender.
     private func startCursorChannel() {
-        guard let l = try? NWListener(using: .udp, on: NWEndpoint.Port(rawValue: Proto.cursorPort)!) else { log("port 7778 unavailable"); return }
+        let udp = NWParameters.udp
+        udp.includePeerToPeer = true
+        guard let l = try? NWListener(using: udp, on: NWEndpoint.Port(rawValue: Proto.cursorPort)!) else { log("port 7778 unavailable"); return }
         l.newConnectionHandler = { [weak self] c in
             c.start(queue: self?.q ?? .main)
             self?.readCursor(c)

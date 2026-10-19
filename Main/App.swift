@@ -27,8 +27,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         get { defaults.string(forKey: "lastReceiver") }
         set { defaults.set(newValue, forKey: "lastReceiver") }
     }
+    // With the direct link, AirDrop's interface is the connection itself: never pause it.
     var cutAirDrop: Bool {
-        get { defaults.object(forKey: "cutAirDrop") as? Bool ?? true }
+        get { !Transport.direct && (defaults.object(forKey: "cutAirDrop") as? Bool ?? true) }
         set { defaults.set(newValue, forKey: "cutAirDrop") }
     }
     var bitrate: Int { defaults.integer(forKey: "bitrate") > 0 ? defaults.integer(forKey: "bitrate") : 25_000_000 }
@@ -40,6 +41,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         updateIcon()
         statusItem.autosaveName = "EncoreScreenStatusItem"
         Hotkey.register { [weak self] in self?.toggleStreaming() }
+        Transport.startMonitoring()
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
         if !defaults.bool(forKey: "mainConfigured") {
@@ -51,7 +53,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     // MARK: Discovery
 
     private func startBrowsing() {
-        let b = NWBrowser(for: .bonjour(type: Proto.serviceType, domain: nil), using: .tcp)
+        let params = NWParameters.tcp
+        params.includePeerToPeer = true   // also find screens reachable over the direct link
+        let b = NWBrowser(for: .bonjour(type: Proto.serviceType, domain: nil), using: params)
         b.browseResultsChangedHandler = { [weak self] results, _ in
             var found: [String: NWEndpoint] = [:]
             for r in results {
@@ -85,7 +89,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     // and look at the path: ready means allowed, "localNetworkDenied" means blocked. Retry until allowed.
     private func probeLocalNetwork() {
         guard !localNetworkOK, probe == nil, let endpoint = receivers.values.first else { return }
-        let c = NWConnection(to: endpoint, using: .udp)
+        let c = NWConnection(to: endpoint, using: Transport.apply(.udp))
         probe = c
         c.stateUpdateHandler = { [weak self] st in
             DispatchQueue.main.async {
@@ -220,7 +224,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let direct = NSMenuItem(title: "Direct Connection, Keeps AirDrop On (Beta)", action: #selector(toggleDirect), keyEquivalent: "")
+        direct.target = self
+        direct.state = Transport.direct ? .on : .off
+        menu.addItem(direct)
         let air = NSMenuItem(title: "Pause AirDrop while streaming", action: #selector(toggleAirDrop), keyEquivalent: "")
+        air.isEnabled = !Transport.direct
         air.target = self
         air.state = cutAirDrop ? .on : .off
         menu.addItem(air)
@@ -254,6 +263,13 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @objc func toggleStreaming() {
         if session != nil { disconnect(); return }
         if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil { connect(name) }
+    }
+
+    @objc private func toggleDirect() {
+        Transport.direct.toggle()
+        AirDrop.set(enabled: true)
+        // Reconnect with the new transport.
+        if let name = activeName { session?.stop(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.connect(name) } }
     }
 
     @objc private func toggleAirDrop() {

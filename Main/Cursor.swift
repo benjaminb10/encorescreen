@@ -24,7 +24,7 @@ final class CursorStreamer {
 
     func start() {
         guard let host = link.remoteHost else { log("cursor: unknown receiver address"); return }
-        let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: .udp)
+        let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: Transport.apply(.udp))
         c.start(queue: q)
         udp = c
         let t = DispatchSource.makeTimerSource(queue: q)
