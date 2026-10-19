@@ -120,6 +120,9 @@ final class Receiver {
         var body: [UInt8] = [3]
         for v in [w, h, mw, mh] { body += [UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
         body.append(UInt8(scale))
+        let id = Array(DeviceIdentity.id.utf8)
+        body.append(UInt8(id.count))
+        body += id
         let len = body.count
         let msg = [UInt8((len >> 24) & 0xFF), UInt8((len >> 16) & 0xFF), UInt8((len >> 8) & 0xFF), UInt8(len & 0xFF)] + body
         c.send(content: Data(msg), completion: .idempotent)
@@ -136,6 +139,10 @@ final class Receiver {
                 let p = Data(body)
                 self.lastReceived = Date()
                 if p[0] == 4 { c.cancel(); return }   // sender stopped streaming
+                if p[0] == Proto.probe, p.count >= 5 {   // latency probe: echo right away
+                    let msg = Data([0, 0, 0, 5, Proto.probeAck]) + p.subdata(in: 1..<5)
+                    c.send(content: msg, completion: .idempotent)
+                }
                 self.handle(type: p[0], payload: p.subdata(in: 1..<p.count))
                 self.readHeader(c)
             }

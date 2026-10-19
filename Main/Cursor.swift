@@ -8,7 +8,7 @@ import Network
 @available(macOS 14.0, *)
 final class CursorStreamer {
     private let displayID: CGDirectDisplayID
-    private let link: Link
+    private let link: ScreenLink
     private let q = DispatchQueue(label: "encorescreen.cursor", qos: .userInteractive)
     private var udp: NWConnection?
     private var timer: DispatchSourceTimer?
@@ -18,18 +18,23 @@ final class CursorStreamer {
     private var shapeHash = 0
     var onMove: (() -> Void)?
 
-    init(displayID: CGDirectDisplayID, link: Link) {
+    init(displayID: CGDirectDisplayID, link: ScreenLink) {
         self.displayID = displayID
         self.link = link
     }
 
     func start() {
+        if link.sendsPointerInline { startTimer(); return }
         guard let host = link.remoteHost else { log("cursor: unknown receiver address"); return }
         let params = NWParameters.udp
         params.serviceClass = .interactiveVoice   // highest Wi-Fi priority (WMM voice queue): tiny, time-critical packets
         let c = NWConnection(host: host, port: NWEndpoint.Port(rawValue: Proto.cursorPort)!, using: params)
         c.start(queue: q)
         udp = c
+        startTimer()
+    }
+
+    private func startTimer() {
         let t = DispatchSource.makeTimerSource(queue: q)
         t.schedule(deadline: .now(), repeating: .milliseconds(8), leeway: .milliseconds(1))
         t.setEventHandler { [weak self] in self?.tick() }
@@ -57,7 +62,8 @@ final class CursorStreamer {
         seq &+= 1
         let pkt: [UInt8] = [6, UInt8(seq >> 8), UInt8(seq & 0xFF), UInt8(x >> 8), UInt8(x & 0xFF),
                             UInt8(y >> 8), UInt8(y & 0xFF), visible ? 1 : 0]
-        udp?.send(content: Data(pkt), completion: .idempotent)
+        if link.sendsPointerInline { _ = link.send(type: Proto.cursorPos, payload: Data(pkt.dropFirst())) }
+        else { udp?.send(content: Data(pkt), completion: .idempotent) }
     }
 
     private func sendShapeIfChanged() {
