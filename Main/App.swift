@@ -10,6 +10,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @Published var lastError: String?
     @Published var localNetworkDenied = false
     @Published var localNetworkOK = false
+    @Published var streaming = false
     private var probe: NWConnection?
     private var probeTimer: Timer?
     @Published var browsing = false
@@ -200,7 +201,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     }
 
     private func updateIcon() {
-        statusItem.button?.image = Brand.menuBarIcon(active: session?.streaming == true)
+        streaming = session?.streaming == true
+        statusItem.button?.image = Brand.menuBarIcon(active: streaming)
     }
 
     // MARK: Menu
@@ -373,6 +375,7 @@ struct OnboardingView: View {
                 step(2, "Let it find your other Mac",
                      controller.localNetworkDenied
                         ? "macOS is blocking the connection. Turn on Encore Screen in Local Network settings."
+                        : networkOK ? "Encore Screen can reach your other Mac on this network."
                         : controller.receivers.isEmpty ? "macOS may ask to find devices on your network. Click Allow."
                                                        : "Checking that macOS lets Encore Screen connect…",
                      done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil,
@@ -388,11 +391,25 @@ struct OnboardingView: View {
                     .toggleStyle(.checkbox)
                     .onChange(of: login) { _, on in LoginItem.set(on) }
                     .padding(.top, 2)
+                if controller.streaming, let name = controller.activeName {
+                    HStack(spacing: 10) {
+                        Circle().fill(Color.green).frame(width: 10, height: 10)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Your extra screen is on").font(.system(size: 14, weight: .semibold))
+                            Text("\(name) is showing your extra screen. Drag a window to it, or stop anytime from the menu bar (⌃⌥⌘S).")
+                                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.green.opacity(0.1)))
+                }
                 Button {
                     if controller.lastReceiver == nil, let first = receivers.first { controller.lastReceiver = first }
                     controller.finishOnboarding()
                 } label: {
-                    Text(receivers.isEmpty ? "Done" : "Start using \(receivers[0])").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    Text(controller.streaming ? "Done" : receivers.isEmpty ? "Done" : "Start using \(receivers[0])")
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Brand.coralUI)
