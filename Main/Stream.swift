@@ -16,7 +16,10 @@ final class VirtualScreen {
     var displayID: CGDirectDisplayID { display.displayID }
 
     // width/height are pixels. On a Retina receiver (hiDPI) macOS uses half of that as the "looks like" size.
-    init(name: String, width: Int, height: Int, sizeMM: CGSize, hiDPI: Bool) {
+    // Fails (instead of crashing) when macOS refuses, e.g. while the previous screen with the same identity is
+    // still being removed after a rotation.
+    init?(name: String, width: Int, height: Int, sizeMM: CGSize, hiDPI: Bool) {
+        guard width > 0, height > 0 else { return nil }
         let desc = CGVirtualDisplayDescriptor()
         desc.setDispatchQueue(DispatchQueue.main)
         desc.name = name
@@ -26,7 +29,9 @@ final class VirtualScreen {
         desc.vendorID = 0xEB15
         desc.productID = 0x0001
         desc.serialNum = stableHash(name)
-        display = CGVirtualDisplay(descriptor: desc)
+        let created: CGVirtualDisplay? = CGVirtualDisplay(descriptor: desc)
+        guard let created, created.displayID != 0 else { return nil }
+        display = created
         let settings = CGVirtualDisplaySettings()
         settings.hiDPI = hiDPI ? 1 : 0
         let (mw, mh) = hiDPI ? (width / 2, height / 2) : (width, height)
@@ -300,7 +305,17 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
         w &= hiDPI ? ~3 : ~1; h &= hiDPI ? ~3 : ~1
         log("receiver \(name): \(width)x\(height) @\(scale)x, streaming at \(w)x\(h)")
         let mm = sizeMM.width > 0 ? sizeMM : CGSize(width: 476, height: 268)
-        let vs = VirtualScreen(name: name, width: w, height: h, sizeMM: mm, hiDPI: hiDPI)
+        createScreen(w: w, h: h, mm: mm, hiDPI: hiDPI, attempt: 0)
+    }
+
+    private func createScreen(w: Int, h: Int, mm: CGSize, hiDPI: Bool, attempt: Int) {
+        guard let vs = VirtualScreen(name: name, width: w, height: h, sizeMM: mm, hiDPI: hiDPI) else {
+            guard attempt < 20 else { endReason = "Could not create the virtual display."; link.stop(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.createScreen(w: w, h: h, mm: mm, hiDPI: hiDPI, attempt: attempt + 1)
+            }
+            return
+        }
         screen = vs
         Task { await self.startCapture(displayID: vs.displayID, width: w, height: h) }
     }
