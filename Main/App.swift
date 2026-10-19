@@ -9,6 +9,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @Published var activeName: String?
     @Published var lastError: String?
     @Published var localNetworkDenied = false
+    @Published var localNetworkOK = false
+    private var probe: NWConnection?
+    private var probeTimer: Timer?
     @Published var browsing = false
     var onSwitchMode: (() -> Void)?
 
@@ -24,8 +27,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         get { defaults.string(forKey: "lastReceiver") }
         set { defaults.set(newValue, forKey: "lastReceiver") }
     }
+    // With the direct link, AirDrop's interface is the connection itself: never pause it.
     var cutAirDrop: Bool {
-        get { defaults.object(forKey: "cutAirDrop") as? Bool ?? true }
+        get { !Transport.direct && (defaults.object(forKey: "cutAirDrop") as? Bool ?? true) }
         set { defaults.set(newValue, forKey: "cutAirDrop") }
     }
     var bitrate: Int { defaults.integer(forKey: "bitrate") > 0 ? defaults.integer(forKey: "bitrate") : 25_000_000 }
@@ -37,6 +41,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         updateIcon()
         statusItem.autosaveName = "SpareScreenStatusItem"
         Hotkey.register { [weak self] in self?.toggleStreaming() }
+        Transport.startMonitoring()
         startBrowsing()
         if !defaults.bool(forKey: "onboarded") { showOnboarding() }
         if !defaults.bool(forKey: "mainConfigured") {
@@ -48,7 +53,9 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     // MARK: Discovery
 
     private func startBrowsing() {
-        let b = NWBrowser(for: .bonjour(type: Proto.serviceType, domain: nil), using: .tcp)
+        let params = NWParameters.tcp
+        params.includePeerToPeer = true   // also find screens reachable over the direct link
+        let b = NWBrowser(for: .bonjour(type: Proto.serviceType, domain: nil), using: params)
         b.browseResultsChangedHandler = { [weak self] results, _ in
             var found: [String: NWEndpoint] = [:]
             for r in results {
@@ -57,7 +64,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.receivers = found
-                if !found.isEmpty { self.localNetworkDenied = false }
+                self.probeLocalNetwork()
                 self.autoConnect()
             }
         }
@@ -75,6 +82,35 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         }
         b.start(queue: .main)
         browser = b
+    }
+
+    // Seeing a screen over Bonjour doesn't prove we may connect to it: macOS can still block the
+    // connection (Local Network). Open a UDP flow to the screen (nothing is sent, so the screen doesn't react)
+    // and look at the path: ready means allowed, "localNetworkDenied" means blocked. Retry until allowed.
+    private func probeLocalNetwork() {
+        guard !localNetworkOK, probe == nil, let endpoint = receivers.values.first else { return }
+        let c = NWConnection(to: endpoint, using: Transport.apply(.udp))
+        probe = c
+        c.stateUpdateHandler = { [weak self] st in
+            DispatchQueue.main.async {
+                guard let self, self.probe === c else { return }
+                switch st {
+                case .ready:
+                    self.localNetworkOK = true
+                    self.localNetworkDenied = false
+                    c.cancel(); self.probe = nil
+                    self.probeTimer?.invalidate(); self.probeTimer = nil
+                case .waiting, .failed:
+                    if c.currentPath?.unsatisfiedReason == .localNetworkDenied { self.localNetworkDenied = true }
+                    c.cancel(); self.probe = nil
+                default: break
+                }
+            }
+        }
+        c.start(queue: .main)
+        if probeTimer == nil {
+            probeTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.probeLocalNetwork() }
+        }
     }
 
     private func autoConnect() {
@@ -99,7 +135,10 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         lastReceiver = name
         if cutAirDrop { AirDrop.set(enabled: false) }
         let s = Session(name: name, endpoint: endpoint, bitrate: bitrate)
-        s.onStateChange = { [weak self] in self?.updateIcon() }
+        s.onStateChange = { [weak self] in
+            self?.updateIcon()
+            if s.streaming { self?.localNetworkOK = true; self?.localNetworkDenied = false }
+        }
         s.onEnd = { [weak self, weak s] reason in
             guard let self, let s, self.session === s else { return }
             self.session = nil
@@ -185,7 +224,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let direct = NSMenuItem(title: "Direct Connection, Keeps AirDrop On (Beta)", action: #selector(toggleDirect), keyEquivalent: "")
+        direct.target = self
+        direct.state = Transport.direct ? .on : .off
+        menu.addItem(direct)
         let air = NSMenuItem(title: "Pause AirDrop while streaming", action: #selector(toggleAirDrop), keyEquivalent: "")
+        air.isEnabled = !Transport.direct
         air.target = self
         air.state = cutAirDrop ? .on : .off
         menu.addItem(air)
@@ -219,6 +263,13 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     @objc func toggleStreaming() {
         if session != nil { disconnect(); return }
         if let name = lastReceiver ?? receivers.keys.sorted().first, receivers[name] != nil { connect(name) }
+    }
+
+    @objc private func toggleDirect() {
+        Transport.direct.toggle()
+        AirDrop.set(enabled: true)
+        // Reconnect with the new transport.
+        if let name = activeName { session?.stop(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.connect(name) } }
     }
 
     @objc private func toggleAirDrop() {
@@ -298,16 +349,19 @@ struct OnboardingView: View {
                 }
                 step(2, "Let it find your other Mac",
                      controller.localNetworkDenied
-                        ? "macOS is blocking the local network. Turn on SpareScreen in Local Network settings."
-                        : "macOS may ask to find devices on your network. Click Allow.",
-                     done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil) { LocalNetwork.openSettings() }
+                        ? "macOS is blocking the connection. Turn on SpareScreen in Local Network settings."
+                        : controller.receivers.isEmpty ? "macOS may ask to find devices on your network. Click Allow."
+                                                       : "Checking that macOS lets SpareScreen connect…",
+                     done: networkOK, button: controller.localNetworkDenied ? "Open Settings" : nil,
+                     searching: !networkOK && !controller.localNetworkDenied && !controller.receivers.isEmpty) { LocalNetwork.openSettings() }
                 step(3, "Set up your extra screen",
                      receivers.isEmpty ? "On the other Mac, open SpareScreen and choose \u{201C}Make this an extra screen\u{201D}. Same Wi-Fi."
                                        : "Found \(receivers.joined(separator: ", ")). You're all set.",
                      done: !receivers.isEmpty, button: nil, searching: receivers.isEmpty && !controller.localNetworkDenied) {}
                 step(4, "Make it smooth",
-                     "Pauses AirDrop while you use the extra screen, so Wi-Fi stays steady. Asks for your password once.",
-                     done: airDropOK, button: "Enable") { AirDrop.installHelper(); airDropOK = AirDrop.helperInstalled }
+                     Transport.direct ? "Direct connection is on: your Macs talk to each other like AirDrop does, and AirDrop stays on."
+                                      : "Pauses AirDrop while you use the extra screen, so Wi-Fi stays steady. Asks for your password once.",
+                     done: airDropOK || Transport.direct, button: "Enable") { AirDrop.installHelper(); airDropOK = AirDrop.helperInstalled }
                 Toggle("Open SpareScreen at login", isOn: $login)
                     .toggleStyle(.checkbox)
                     .onChange(of: login) { _, on in LoginItem.set(on) }
@@ -336,7 +390,7 @@ struct OnboardingView: View {
         .onReceive(timer) { _ in screenOK = ScreenPermission.granted }
     }
 
-    private var networkOK: Bool { !controller.receivers.isEmpty || (controller.browsing && !controller.localNetworkDenied) }
+    private var networkOK: Bool { controller.localNetworkOK }
 
     private var header: some View {
         ZStack {

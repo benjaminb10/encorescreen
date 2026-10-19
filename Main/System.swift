@@ -1,6 +1,7 @@
 // System integration: AirDrop (awdl0 interface), screen capture and local network permissions.
 import AppKit
 import AVFoundation
+import Network
 import ScreenCaptureKit
 
 // AirDrop makes Wi-Fi hop channels several times per second, which causes stutter.
@@ -88,5 +89,31 @@ enum ScreenPermission {
 enum LocalNetwork {
     static func openSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")!)
+    }
+}
+
+// Experimental: talk to the screen over the direct Wi-Fi link AirDrop uses (AWDL), like Sidecar does,
+// instead of going through the router. AirDrop stays on, and both Macs don't even need the same network.
+enum Transport {
+    static var direct: Bool {
+        get { UserDefaults.standard.bool(forKey: "directLink") }
+        set { UserDefaults.standard.set(newValue, forKey: "directLink") }
+    }
+    private static var monitor: NWPathMonitor?
+    private(set) static var routerInterfaces: [NWInterface] = []
+
+    // Remember the regular network interfaces (Wi-Fi, Ethernet) so a direct connection can avoid them.
+    static func startMonitoring() {
+        let m = NWPathMonitor()
+        m.pathUpdateHandler = { path in routerInterfaces = path.availableInterfaces }
+        m.start(queue: .main)
+        monitor = m
+    }
+
+    static func apply(_ p: NWParameters) -> NWParameters {
+        guard direct else { return p }
+        p.includePeerToPeer = true
+        p.prohibitedInterfaces = routerInterfaces
+        return p
     }
 }
