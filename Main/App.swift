@@ -275,6 +275,7 @@ struct OnboardingView: View {
     @ObservedObject var controller: Controller
     let close: () -> Void
     @State private var screenOK = ScreenPermission.granted
+    @State private var askedScreen = false
     @State private var airDropOK = AirDrop.helperInstalled
     @State private var login = LoginItem.enabled
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -284,8 +285,17 @@ struct OnboardingView: View {
             header
             VStack(alignment: .leading, spacing: 12) {
                 step(1, "Let SpareScreen show your extra screen",
-                     "macOS asks for Screen Recording. SpareScreen only sends the extra screen to your other Mac.",
-                     done: screenOK, button: "Allow") { ScreenPermission.request() }
+                     askedScreen
+                        ? "Turn on SpareScreen in the list that just opened. Not there? Drag SpareScreen from Finder into the list."
+                        : "macOS asks for Screen Recording. SpareScreen only sends the extra screen to your other Mac.",
+                     done: screenOK, button: askedScreen ? "Show in Finder" : "Allow") {
+                    if askedScreen {
+                        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                    } else {
+                        ScreenPermission.request()
+                        askedScreen = true
+                    }
+                }
                 step(2, "Let it find your other Mac",
                      controller.localNetworkDenied
                         ? "macOS is blocking the local network. Turn on SpareScreen in Local Network settings."

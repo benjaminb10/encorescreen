@@ -1,5 +1,6 @@
 // System integration: AirDrop (awdl0 interface), screen capture and local network permissions.
 import AppKit
+import AVFoundation
 import ScreenCaptureKit
 
 // AirDrop makes Wi-Fi hop channels several times per second, which causes stutter.
@@ -60,14 +61,25 @@ enum ScreenPermission {
 
     // Touching ScreenCaptureKit registers the app in System Settings and shows the system prompt.
     // Settings only opens if access is still missing a moment later, with SpareScreen already listed.
-    // Both calls are needed for SpareScreen to be listed in System Settings on recent macOS.
-    // The system prompt has its own "Open System Settings" button; we only open Settings on a second click.
+    private static var probe: AVCaptureSession?
+
+    // macOS only lists an app under Screen Recording once it has really tried to capture.
+    // So we ask, then start a one-second capture of the main display: that registers SpareScreen
+    // in System Settings (switched off, ready to be turned on) and shows the system prompt.
     static func request() {
         let askedBefore = UserDefaults.standard.bool(forKey: "screenPromptShown")
         UserDefaults.standard.set(true, forKey: "screenPromptShown")
         CGRequestScreenCaptureAccess()
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { _, _ in }
-        if askedBefore && !granted {
+        let session = AVCaptureSession()
+        if let input = AVCaptureScreenInput(displayID: CGMainDisplayID()), session.canAddInput(input) {
+            session.addInput(input)
+            session.startRunning()
+            probe = session
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { probe?.stopRunning(); probe = nil }
+        }
+        // Open the list right away, next to the system prompt, so the user sees where to switch it on.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (askedBefore ? 0 : 2)) {
+            guard !granted else { return }
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
         }
     }

@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         c.onSwitchMode = { [weak self] in self?.switchMode() }
         mainController = c
         c.launch()
+        if CommandLine.arguments.contains("--request-screen") { ScreenPermission.request() }  // for testing
     }
 
     private func startScreen() {
