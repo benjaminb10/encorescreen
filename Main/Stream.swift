@@ -322,7 +322,15 @@ final class Session: NSObject, SCStreamOutput, SCStreamDelegate {
               let pb = CMSampleBufferGetImageBuffer(sb) else { return }
         lastFrame = pb
         lastFrameTime = Date()
-        onActivity?()
+        // Only real movement counts (a window, a scroll, a video), not a blinking text caret or a ticking clock:
+        // above 1% of the screen changed in this frame.
+        if let rects = atts.first?[.dirtyRects] as? [NSDictionary] {
+            let area = rects.compactMap { CGRect(dictionaryRepresentation: $0) }.reduce(0) { $0 + $1.width * $1.height }
+            let total = CGFloat(CVPixelBufferGetWidth(pb) * CVPixelBufferGetHeight(pb))
+            if total > 0, area / total > 0.01 { onActivity?() }
+        } else {
+            onActivity?()
+        }
         encoder?.encode(pb, pts: CMSampleBufferGetPresentationTimeStamp(sb))
     }
 
