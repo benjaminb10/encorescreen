@@ -21,6 +21,16 @@ enum AirDrop {
         return runAsAdmin(shell)
     }
 
+    // True when the awdl0 interface is up (AirDrop / Continuity active).
+    static var isActive: Bool {
+        var addrs: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addrs) == 0, let first = addrs else { return false }
+        defer { freeifaddrs(addrs) }
+        for p in sequence(first: first, next: { $0.pointee.ifa_next })
+            where String(cString: p.pointee.ifa_name) == "awdl0" && (Int32(p.pointee.ifa_flags) & IFF_UP) != 0 { return true }
+        return false
+    }
+
     static func uninstallHelper() { runAsAdmin("rm -f \(sudoersPath)") }
 
     static func set(enabled: Bool) {

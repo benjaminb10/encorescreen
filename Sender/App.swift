@@ -12,6 +12,7 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
     private var browser: NWBrowser?
     private var session: Session?
     private var userStopped = false
+    private var airDropGuard: Timer?
     private var onboardingWindow: NSWindow?
     private let defaults = UserDefaults.standard
 
@@ -76,6 +77,8 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
             guard let self, let s, self.session === s else { return }
             self.session = nil
             self.activeName = nil
+            self.airDropGuard?.invalidate()
+            self.airDropGuard = nil
             if let reason { self.lastError = reason }
             if self.cutAirDrop { AirDrop.set(enabled: true) }
             self.updateIcon()
@@ -87,6 +90,12 @@ final class Controller: NSObject, ObservableObject, NSMenuDelegate {
         session = s
         activeName = name
         s.start()
+        // macOS turns AirDrop back on by itself from time to time: keep it paused for the whole session.
+        airDropGuard?.invalidate()
+        airDropGuard = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self, self.session != nil, self.cutAirDrop, AirDrop.helperInstalled, AirDrop.isActive else { return }
+            DispatchQueue.global().async { AirDrop.set(enabled: false) }
+        }
         updateIcon()
     }
 
