@@ -13,6 +13,7 @@ export default async function handler(req, res) {
     if (!existing.some((r) => r.content === ip)) await createRecord('A', label, ip)
     res.status(200).json({ host: `${label}.${ZONE}` })
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) })
+    console.error('ip', id, e)
+    res.status(500).json({ error: 'Could not update the name, try again later' })
   }
 }

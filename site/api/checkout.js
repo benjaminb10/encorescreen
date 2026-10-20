@@ -31,6 +31,6 @@ export default async function handler(req, res) {
     body: form,
   })
   const session = await r.json()
-  if (!r.ok) return res.status(502).json({ error: session.error?.message || 'Stripe error' })
+  if (!r.ok) { console.error('checkout', session.error); return res.status(502).json({ error: 'Payment is unavailable right now' }) }
   res.status(200).json({ clientSecret: session.client_secret, publishableKey: process.env.STRIPE_PUBLISHABLE_KEY })
 }

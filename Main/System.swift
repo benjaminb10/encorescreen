@@ -19,10 +19,13 @@ enum AirDrop {
     @discardableResult
     static func installHelper() -> Bool {
         let user = NSUserName()
+        // Short user names are letters, digits, "_", "-" and "."; anything else would not be safe in a shell rule.
+        guard user.range(of: "^[A-Za-z0-9_.-]+$", options: .regularExpression) != nil else { return false }
         let rule = "\(user) ALL=(root) NOPASSWD: /sbin/ifconfig awdl0 down, /sbin/ifconfig awdl0 up"
-        let tmp = "/tmp/encorescreen-sudoers"
-        let shell = "printf '%s\\n' '\(rule)' > \(tmp) && /usr/sbin/visudo -cf \(tmp) && "
-            + "/usr/bin/install -m 0440 -o root -g wheel \(tmp) \(sudoersPath); rm -f \(tmp)"
+        // The temporary file is created by root with a random name (never a fixed path in /tmp that another
+        // process could prepare), checked by visudo, then installed.
+        let shell = "t=$(/usr/bin/mktemp /private/var/root/encorescreen.XXXXXX) && printf '%s\\n' '\(rule)' > \"$t\" && "
+            + "/usr/sbin/visudo -cf \"$t\" && /usr/bin/install -m 0440 -o root -g wheel \"$t\" \(sudoersPath); rm -f \"$t\""
         return runAsAdmin(shell)
     }
 

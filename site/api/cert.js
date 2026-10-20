@@ -60,7 +60,8 @@ export default async function handler(req, res) {
     const cert = await client.getCertificate(done)
     res.status(200).json({ cert })
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) })
+    console.error('cert', id, e)
+    res.status(500).json({ error: 'Could not issue the certificate, try again later' })
   } finally {
     await deleteRecords("TXT", challengeName).catch(() => {})
   }

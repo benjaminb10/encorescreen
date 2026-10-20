@@ -85,7 +85,7 @@ final class WebLink: ScreenLink {
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let w = json["w"] as? Int, let h = json["h"] as? Int {
                 var hello = Hello(width: w, height: h, sizeMM: .zero, scale: json["scale"] as? Int ?? 1,
-                                  deviceID: json["id"] as? String ?? "", deviceName: json["name"] as? String ?? "Browser",
+                                  deviceID: String((json["id"] as? String ?? "").prefix(64)), deviceName: WebLink.cleanName(json["name"] as? String),
                                   key: json["key"] as? String)
                 if let host = self.remoteHost {
                     let ip = "\(host)".replacingOccurrences(of: "%.*", with: "", options: .regularExpression)
@@ -95,6 +95,13 @@ final class WebLink: ScreenLink {
             }
             self.receive()
         }
+    }
+
+    // The page names itself ("iPhone", "Android tablet"…). Shown in the approval alert, so keep it short and plain.
+    static func cleanName(_ raw: String?) -> String {
+        let plain = (raw ?? "").unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) && !CharacterSet.newlines.contains($0) }
+        let name = String(String.UnicodeScalarView(plain)).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "Browser" : String(name.prefix(40))
     }
 
     func send(type: UInt8, payload: Data) -> Bool {
