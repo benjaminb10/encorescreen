@@ -23,6 +23,8 @@ anyway. Each Mac therefore needs a real certificate for a name that points to it
   are accepted for names.
 - App: `Main/Certificate.swift` (runs at launch and every 15 min). RSA 2048 keys, so the chain ends at
   ISRG Root X1 (older iPhones, Android, Catalina). The full chain is sent by `TLSIdentity.load()`.
+- Abuse protection: a Vercel firewall rule allows 10 requests per hour per IP on `/api/cert` and `/api/ip`
+  (the Hobby plan allows one rate limit rule).
 - Limit to watch: Let's Encrypt allows 50 new certificates per week for encorescreen.com (renewals don't count).
   If the app takes off: ask Let's Encrypt for a rate limit increase, or add `direct.encorescreen.com` to the
   Public Suffix List.
